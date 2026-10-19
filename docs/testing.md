@@ -21,7 +21,7 @@ RL 入口默认设置 `MALLOC_ARENA_MAX=2`，减少 glibc 在多线程模型与�
 | --- | --- |
 | `rl/test_gpu_inference.py` | `models/GR00T-N1.6-G1/checkpoint-20000`、`data/locomanipulation/generated/lerobot` 的 episode 0/49/99 第 100 帧；CUDA。分别运行 reference 与 RL fork，保留 `atol=rtol=1e-5` 的比较报告和源码选择。fork 已知存在 letterbox 预处理差异，原检查允许比较结果为不等价并选择 reference。 |
 | `rl/test_gpu_actor.py` | 同上；自动在 reference 子进程生成真实 observation，再验证 actor、value、ratio 与各组梯度，无需依赖其他测试的执行顺序。 |
-| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter 的两个真实环境，物理设备为 CPU。无需 checkpoint。 |
+| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter，默认 2 个真实环境、CPU 物理。独立 worker 支持 `--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
 | `rl/test_gpu_checkpoint.py` | 解析后的 RL 配置、完整训练权重及配置引用的基座模型；Isaac Sim、Arena 资产与 CUDA，重载后闭环执行两个动作块。 |
 | `rl/test_gpu_precision.py` | 同一份解析后 RL 配置、完整训练权重及基座模型；足够的主机内存加载模型，逐张量验证 dtype 和数值。 |
 | `rl/test_gpu_export.py` | 同一 RL 配置和完整权重、导出目录（含 `rl_export.json`）、G1 基座模型与上述数据；CUDA、空闲本地端口 5556。导出 manifest 必须对应被检查的权重路径；实测 RLinf 与 server 的单条及批量请求，保留 `atol=rtol=1e-5` 和初始噪声逐位相等判据。 |
@@ -105,5 +105,20 @@ journalctl --user -u "$GROOT_UNIT" -f
 `RemainAfterExit=yes` 会让成功结束的服务保留 `ActiveState=active`、`SubState=exited`；不能只看 active 判断测试仍在运行。失败时检查 `Result`、退出码和 journal。每套测试都应先记录结果，再用 `systemctl --user stop "$RL_UNIT"` 或 `systemctl --user stop "$GROOT_UNIT"` 清理服务；主动 stop 可能改变结果字段，因此 stop 后的状态不能替代原始完成证据。两套 GPU 测试顺序运行，避免与训练同时占用 GPU。
 
 检查其他 checkpoint 时相应修改 `--setenv=LAB_GPU_*`，SFT 同时指定精确的预期步数 `LAB_GPU_SMOKE_STEPS`。单项测试同样先确认 `Linger=yes`，再通过 `systemd-run --user` 托管，并保留该项所需的产物变量：将服务命令替换为 `bash -c 'source scripts/env.sh; exec "$RL_PY" -m unittest tests.rl.test_gpu_actor'`；GR00T 项使用 `$GROOT_PY`。
+
+Arena worker 可独立指定环境数和查看器。在上述临时服务中将命令替换为以下内容，并为每组指定不同的输出文件：
+
+```bash
+bash -c '
+  source scripts/env.sh
+  mkdir -p "$LAB_ROOT/logs/gpu-tests"
+  export LD_LIBRARY_PATH="$("$RL_PY" -c "import sysconfig; print(sysconfig.get_path(\"purelib\"))")/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  cd "$ARENA_ROOT"
+  exec "$RL_PY" -m tests.rl.test_gpu_arena \
+    --num-envs 4 --output "$LAB_ROOT/logs/gpu-tests/arena-4.json"
+'
+```
+
+并行环境与 Viser 的 GPU 回归顺序运行 `--num-envs 2`、`--num-envs 4`、`--num-envs 2 --viser-envs 1` 三组。`--device cuda:0` 可切换为 GPU PhysX；`--legacy-factory` 检查 legacy adapter。独立 worker 与默认 unittest 入口均检查只在第 0 个环境注入成功、跌倒、超时和掉箱信号，其余环境不应误触发。
 
 更换导出目录时，同时用 `LAB_GPU_EXPORT` 指定新的目录；导出来源权重必须与 `LAB_GPU_RL_WEIGHTS` 一致。完整导出与评测说明见 [eval.md](eval.md)。

@@ -11,7 +11,12 @@ from rlinf.envs.sim.isaaclab.venv import SubProcIsaacLabEnv
 def make_sim(cfg, num_envs, seed):
     from isaaclab.app import AppLauncher
 
-    app = AppLauncher(headless=True, enable_cameras=True, device=cfg.device).app
+    launcher_kwargs = {}
+    if cfg.viser_envs > 0:
+        launcher_kwargs.update(visualizer="viser", max_visible_envs=cfg.viser_envs)
+    app = AppLauncher(
+        headless=True, enable_cameras=True, device=cfg.device, **launcher_kwargs
+    ).app
     from isaaclab_arena.environments.isaaclab_interop import (
         environment_registration_callback,
     )

@@ -60,6 +60,7 @@ env:
     use_rel_reward: false
     reward_coef: 1.0
     total_num_envs: 2
+    viser_envs: 0
     group_size: 1
     max_episode_steps: 1500
     max_steps_per_rollout_epoch: 1500

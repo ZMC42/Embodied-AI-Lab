@@ -54,6 +54,7 @@ def main():
     model.to(device="cuda")
     torch.manual_seed(2000)
     cfg.env.eval.device = args.device
+    cfg.env.eval.viser_envs = 0
     env, app = make_sim(cfg.env.eval, 2, 2000)
     try:
         obs, _ = env.reset(seed=2000)

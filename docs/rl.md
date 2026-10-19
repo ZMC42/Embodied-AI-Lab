@@ -13,7 +13,7 @@
 
 冻结参数始终使用 BF16 存储。offload 配方的可训练主权重为 FP32，FSDP 前向 BF16，梯度归约 FP32，Adam 状态 FP32，rollout BF16。`actor.model.train_last_blocks=N` 调整末尾 DiT block 数。`actor.micro_batch_size=1` 和 `actor.model.inference_micro_batch_size=1` 需一并保留，避免 BF16 下重组 batch 改变 chunk log-prob。
 
-默认 seed=1000、2 个环境、50 步动作块、1500 步 episode。offload 每个 update epoch 累积 60 个动作块后更新；改变环境数或 rollout 长度时也需调整 global batch，使其能整除采集的动作块数。入口默认 `MALLOC_ARENA_MAX=2`，减少主机内存保留，为 CPU checkpoint 保存留出空间；可用同名环境变量覆盖。
+默认 seed=1000、2 个环境、50 步动作块、1500 步 episode。offload 每个 update epoch 累积 60 个动作块后更新。入口默认 `MALLOC_ARENA_MAX=2`，减少主机内存保留，为 CPU checkpoint 保存留出空间；可用同名环境变量覆盖。
 
 只解析配置，不启动训练：
 
@@ -23,6 +23,28 @@ scripts/train/rl.sh ppo --cfg job --resolve
 ```
 
 GR00T RL fork 的 letterbox 预处理与 reference 不同，因此实际 RL 使用 GR00T reference；fork 保留作推理对照。reference 与 RLinf 的 attention 使用 SDPA；Euler 去噪更新顺序与 BF16 舍入通过 fork 保持一致。无需再手动安装补丁。
+
+## 并行环境数
+
+默认 `ppo-offload` 仍使用 2 个环境。在下方的 systemd 托管命令中，用 `scripts/train/rl.sh env.train.total_num_envs=N` 指定环境数，或在 recipe 后追加 `env.train.total_num_envs=N`。例如使用 4 个环境：
+
+```bash
+scripts/train/rl.sh env.train.total_num_envs=4 --cfg job --resolve
+```
+
+该命令仅查看配置；实际训练按下方的方式托管。`ppo-offload` 的 `actor.global_batch_size` 自动解析为 `N × (max_steps_per_rollout_epoch / num_action_chunks)`，默认 rollout 长度下为 `30N`。2、4、8 个环境分别对应 60、120、240，每轮的每个 update epoch 仍只更新一次，学习率不变。`ppo` 配方的 batch 保持原配置，改变它的环境数时需要自行同步 batch。
+
+容量实测使用 GPU PhysX、seed=1000、官方 checkpoint-20000，目标为每组两轮并在第 2 轮保存。成功组的第 2 轮迭代耗时不含保存，整卡峰值包含保存；余量统一按可分配的 24082 MiB 减去峰值计算。原始数据位于 `logs/num-envs-viser/`。
+
+| 环境数 | global batch | 第 2 轮耗时 / s | 控制步 / s | 整卡峰值 / MiB | 余量 / MiB | 退出码 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2 | 60 | 113.057 | 26.535 | 22935 | 1147 | 0 |
+| 4 | 120 | 156.626 | 38.308 | 23427 | 655 | 0 |
+| 8 | 240 | — | — | 24074 | 8 | 245（OOM 后受控终止） |
+
+2env 数据来自 `baseline-n2-retry1/`。相对 R3c 约 24.55 步/s 的参考值快 8.10%，超过 5% 的复查线。复查确认 R3c 取首轮，本表取第 2 轮；同口径首轮耗时为本次 124.081 s、R3c 122.216 s，差约 1.53%。这里的 8.10% 不能作为实现提速结论。
+
+8env 在第 2 轮权重同步的 rollout CUDA IPC 接收克隆阶段 OOM：申请 128 MiB 时仅剩 8.88 MiB。记录异常后受控终止，未完成第 2 轮或保存，因此不报告该轮吞吐；表中为退出前采样峰值。
 
 ## 两迭代短跑
 
