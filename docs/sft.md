@@ -19,18 +19,12 @@
 
 ## 冒烟与正式训练
 
-以下命令运行 20 步并保存一次，不修改默认 smoke 配方。先按 [托管要求](setup.md#持续任务托管) 确认 `Linger=yes`，每次使用新的运行目录：
+以下命令运行 20 步并保存一次，不修改默认 smoke 配方。每次使用新的运行目录：
 
 ```bash
 RUN_DIR="$PWD/models/sft-smoke-$(date +%Y%m%d-%H%M%S)"
-UNIT="lab-sft-smoke-$(date +%s)"
-systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes \
-  --setenv=CUDA_VISIBLE_DEVICES=0 \
-  "$PWD/scripts/train/sft.sh" smoke -- \
+CUDA_VISIBLE_DEVICES=0 scripts/train/sft.sh smoke -- \
   --output-dir "$RUN_DIR" --max-steps 20 --save-steps 20
-systemctl --user show "$UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
-journalctl --user -u "$UNIT" -f
 ```
 
 完成时退出 0，生成 `checkpoint-20`（模型、优化器、scheduler、RNG、processor 等）及输出目录下的 `DONE`。`DONE` 只在正常退出后写入，启动时清除旧标记。日志同时追加到 `logs/train-sft/smoke.log`；不同运行共用配方日志，checkpoint 通过不同 output-dir 区分。已有输出目录中的 checkpoint 可能触发上游自动恢复，不保证逐位复现。
@@ -38,11 +32,7 @@ journalctl --user -u "$UNIT" -f
 正式配方示例（4 张可见 GPU，每卡 batch=24）：
 
 ```bash
-UNIT="lab-sft-full-$(date +%s)"
-systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes \
-  --setenv=CUDA_VISIBLE_DEVICES=0,1,2,3 \
-  "$PWD/scripts/train/sft.sh" g1-full --per-device-batch 24 -- \
+CUDA_VISIBLE_DEVICES=0,1,2,3 scripts/train/sft.sh g1-full --per-device-batch 24 -- \
   --output-dir "$PWD/models/sft-full-$(date +%Y%m%d-%H%M%S)"
 ```
 
@@ -53,11 +43,8 @@ systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
 用刚生成的 checkpoint 执行 GPU 回归：
 
 ```bash
-UNIT="lab-sft-check-$(date +%s)"
-systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes \
-  --setenv="LAB_GPU_SMOKE=$RUN_DIR/checkpoint-20" --setenv=LAB_GPU_SMOKE_STEPS=20 \
-  "$PWD/scripts/test.sh" groot --gpu
+LAB_GPU_SMOKE="$RUN_DIR/checkpoint-20" LAB_GPU_SMOKE_STEPS=20 \
+  scripts/test.sh groot --gpu
 ```
 
 检查训练步数、保存状态、冻结与更新权重，以及 LeRobot episode 0/49/99 第 100 帧的推理。数据必须包含这些帧，检查不测闭环成功率。模型使用 31 维状态、35 维动作、50 步动作块；processor 补齐到 128 维，loss mask 只覆盖有效动作维度，原始 Parquet 的 43 维关节向量不能直接视为模型动作。

@@ -28,13 +28,13 @@ GR00T RL fork 的 letterbox 预处理与 reference 不同，因此实际 RL 使�
 
 ## 并行环境数
 
-默认 `ppo-offload` 仍使用 2 个环境。在下方的 systemd 托管命令中，用 `scripts/train/rl.sh env.train.total_num_envs=N` 指定环境数，或在 recipe 后追加 `env.train.total_num_envs=N`。例如使用 4 个环境：
+默认 `ppo-offload` 仍使用 2 个环境。在训练命令中，用 `scripts/train/rl.sh env.train.total_num_envs=N` 指定环境数，或在 recipe 后追加 `env.train.total_num_envs=N`。例如使用 4 个环境：
 
 ```bash
 scripts/train/rl.sh env.train.total_num_envs=4 --cfg job --resolve
 ```
 
-该命令仅查看配置；实际训练按下方的方式托管。`ppo-offload` 的 `actor.global_batch_size` 自动解析为 `N × (max_steps_per_rollout_epoch / num_action_chunks)`，默认 rollout 长度下为 `30N`。2、4、8 个环境分别对应 60、120、240，每轮的每个 update epoch 仍只更新一次，学习率不变。`ppo` 配方的 batch 保持原配置，改变它的环境数时需要自行同步 batch。
+该命令仅查看配置；实际训练见下方短跑示例。`ppo-offload` 的 `actor.global_batch_size` 自动解析为 `N × (max_steps_per_rollout_epoch / num_action_chunks)`，默认 rollout 长度下为 `30N`。2、4、8 个环境分别对应 60、120、240，每轮的每个 update epoch 仍只更新一次，学习率不变。`ppo` 配方的 batch 保持原配置，改变它的环境数时需要自行同步 batch。
 
 容量实测使用 GPU PhysX、seed=1000、官方 checkpoint-20000，目标为每组两轮并在第 2 轮保存。成功组的第 2 轮迭代耗时不含保存，整卡峰值包含保存；余量统一按可分配的 24082 MiB 减去峰值计算。原始数据位于 `logs/num-envs-viser/`。
 
@@ -68,27 +68,24 @@ scripts/train/rl.sh env.train.total_num_envs=4 --cfg job --resolve
 
 ## 两迭代短跑
 
-先按 [托管要求](setup.md#持续任务托管) 确认 `Linger=yes`。以下短跑在第 2 次迭代保存一次，保留默认模型、batch 与 rollout 长度：
+以下短跑在第 2 次迭代保存一次，保留默认模型、batch 与 rollout 长度：
 
 ```bash
 RUN_DIR="$PWD/logs/rl-training/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN_DIR"
-UNIT="lab-ppo-$(date +%s)"
-systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes --property=TimeoutStopSec=20 \
-  --property="StandardOutput=append:$RUN_DIR/systemd.log" --property=StandardError=inherit \
-  /usr/bin/python3 -m embodied_ai_lab.monitor --output "$RUN_DIR" \
+set -o pipefail
+/usr/bin/python3 -m embodied_ai_lab.monitor --output "$RUN_DIR" \
   "$PWD/scripts/train/rl.sh" ppo-offload \
   "runner.logger.log_path=$RUN_DIR" runner.logger.experiment_name=train \
-  runner.max_epochs=2 runner.max_steps=2 runner.save_interval=2
-systemctl --user show "$UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
+  runner.max_epochs=2 runner.max_steps=2 runner.save_interval=2 \
+  2>&1 | tee "$RUN_DIR/run.log"
 ```
 
 同一时间顺序运行 GPU 任务，避免训练与仿真互抢资源。默认 offload 配方虽只跑两个 epoch，但保存间隔是 125，短跑必须显式覆盖为 2。正常结束时 `process.json` 中 exit_code=0，保存完整权重和恢复状态。
 
 | 产物 | 位置（相对 RUN_DIR） |
 | --- | --- |
-| 服务输出 | `systemd.log` |
+| 终端日志 | `run.log` |
 | 退出状态、耗时、整卡峰值显存 | `process.json`、`gpu-memory.csv` |
 | 有效配置与指标 | `tensorboard/config.yaml`、`tensorboard/` |
 | 完整模型权重 | `train/checkpoints/global_step_2/actor/model_state_dict/full_weights.pt` |
@@ -98,7 +95,7 @@ systemctl --user show "$UNIT" -p ActiveState -p SubState -p Result -p ExecMainSt
 
 ## 恢复与指标
 
-在上述托管命令末尾追加 `"runner.resume_dir=$PREVIOUS_RUN/train/checkpoints/global_step_2"` 恢复；`PREVIOUS_RUN` 指向旧的运行目录，新运行使用不同的 `RUN_DIR`。resume_dir 指到 `global_step_N`，保持模型、训练范围、环境数和 batch 一致，将 max_epochs、max_steps 设置为恢复后的目标总步数。恢复模型、优化器和 scheduler，不保证仿真轨迹逐位续接。
+在上述训练参数末尾、日志管道之前追加 `"runner.resume_dir=$PREVIOUS_RUN/train/checkpoints/global_step_2"` 恢复；`PREVIOUS_RUN` 指向旧的运行目录，新运行使用不同的 `RUN_DIR`。resume_dir 指到 `global_step_N`，保持模型、训练范围、环境数和 batch 一致，将 max_epochs、max_steps 设置为恢复后的目标总步数。恢复模型、优化器和 scheduler，不保证仿真轨迹逐位续接。
 
 offload 配方启用 `algorithm.log_epoch_metrics`，记录 `actor/epoch_1..N/{clip_fraction,approx_kl,ratio,valid_count}` 和剔除 epoch1 的 `actor/epoch_ge_2/*`。按 PPO 实际广播后的有效 loss_mask 元素数加权，跨 rank 求和再相除；全零 mask 的整组均值为 NaN。`approx_kl` 使用有符号的 `-mean(log_ratio)`，`clip_fraction` 沿用上游考虑 advantage 的裁剪判定。原有跨 epoch 聚合指标保持原口径。
 

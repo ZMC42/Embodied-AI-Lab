@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run under systemd --user; both the server and simulator remain in its cgroup.
+# Run evaluation backends in sequence and clean up their child processes.
 set -eo pipefail
 source "$(dirname "$0")/../env.sh"
 run_dir="${1:?Usage: baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed]}"

@@ -9,7 +9,7 @@ scripts/test.sh rl
 
 `arena`、`groot`、`rl` 分别使用 `scripts/env.sh` 导出的对应解释器；`all` 按这个顺序运行三套环境。默认执行各目录的普通 `test_*.py`，排除 `test_gpu_*.py`。默认测试仍包含 CUDA/FSDP 检查，因此并非纯 CPU 测试。`--gpu` 只执行 `test_gpu_*.py`，不重复普通测试。GPU 测试通过 unittest discovery 收集，真实模型、仿真及不同 GR00T 版本各在独立 subprocess 中运行，失败退出码会传回 unittest。
 
-普通测试通常短时完成，可以直接执行上述命令；GPU 测试按下文使用临时 user service 托管。
+GPU 测试的前置产物和运行示例见下文。
 
 ## GPU 测试所需产物
 
@@ -37,19 +37,13 @@ GPU checkpoint 测试通过以下环境变量指定本次产物。四个路径�
 | `LAB_GPU_SMOKE` | SFT 短跑保存的 `checkpoint-20` 目录 |
 | `LAB_GPU_SMOKE_STEPS` | `20`，精确匹配预期保存步数；检查其他 checkpoint 时同时设置路径与步数 |
 
-导出目录通过 `scripts/eval/export-rl.sh` 生成，托管示例见下文；输出必须是尚不存在的新目录，已有导出应先保留。
+导出目录通过 `scripts/eval/export-rl.sh` 生成，运行示例见下文；输出必须是尚不存在的新目录，已有导出应先保留。
 
 测试报告位于 `logs/gpu-tests/`。每次运行会重新生成并覆盖自己的 observation 和报告；需保留多次结果时，运行前将上一次报告复制到其他日志目录。上述大型文件及日志应通过项目的 `data/models/logs/cache` 软链接落到外部存储。
 
-## 由 systemd 托管
+## 依次运行导出与 GPU 测试
 
-GPU 测试和模型导出可能持续运行，必须先确认用户管理器的 `Linger=yes`：
-
-```bash
-loginctl show-user "$USER" -p Linger
-```
-
-若不是 `Linger=yes`，先运行 `loginctl enable-linger "$USER"`，再确认一次。使用临时 user service，不执行 `systemctl enable`。将下列两个运行目录替换成已完成的 [RL](rl.md#两迭代短跑) 和 [SFT](sft.md#冒烟与正式训练) 短跑目录；在同一个 shell 中依次执行后面的示例：
+将下列两个运行目录替换成已完成的 [RL](rl.md#两迭代短跑) 和 [SFT](sft.md#冒烟与正式训练) 短跑目录；在同一个 shell 中依次执行后面的示例：
 
 ```bash
 RL_RUN="$PWD/logs/rl-training/your-run"
@@ -60,63 +54,42 @@ EXPORT_DIR="$PWD/models/rl-export-$(date +%Y%m%d-%H%M%S)"
 先用这份 RL 权重生成导出产物，输出目录必须尚不存在：
 
 ```bash
-EXPORT_UNIT="lab-test-export-$(date +%s)"
-systemd-run --user --unit="$EXPORT_UNIT" \
-  --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes \
-  "$PWD/scripts/eval/export-rl.sh" \
+scripts/eval/export-rl.sh \
   --weights "$RL_RUN/train/checkpoints/global_step_2/actor/model_state_dict/full_weights.pt" \
   --output "$EXPORT_DIR"
-
-systemctl --user show "$EXPORT_UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
-journalctl --user -u "$EXPORT_UNIT" -f
 ```
 
-等待导出进程退出，确认 `SubState=exited`、`Result=success`、`ExecMainStatus=0`，保存 `systemctl show` 输出及导出日志后，再用 `systemctl --user stop "$EXPORT_UNIT"` 清理服务。主动 stop 可能改变结果字段，必须先记录完成证据。确认导出成功后运行 RL GPU 测试：
+等待导出命令退出，确认退出码为 0 且生成 `rl_export.json`，再运行 RL GPU 测试：
 
 ```bash
-RL_UNIT="lab-gpu-rl-$(date +%s)"
-systemd-run --user --unit="$RL_UNIT" \
-  --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes \
-  --setenv="LAB_GPU_RL_CONFIG=$RL_RUN/tensorboard/config.yaml" \
-  --setenv="LAB_GPU_RL_WEIGHTS=$RL_RUN/train/checkpoints/global_step_2/actor/model_state_dict/full_weights.pt" \
-  --setenv="LAB_GPU_EXPORT=$EXPORT_DIR" \
-  "$PWD/scripts/test.sh" rl --gpu
-
-systemctl --user show "$RL_UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
-journalctl --user -u "$RL_UNIT" -f
+LAB_GPU_RL_CONFIG="$RL_RUN/tensorboard/config.yaml" \
+LAB_GPU_RL_WEIGHTS="$RL_RUN/train/checkpoints/global_step_2/actor/model_state_dict/full_weights.pt" \
+LAB_GPU_EXPORT="$EXPORT_DIR" \
+  scripts/test.sh rl --gpu
 ```
 
-等待 RL 测试进程退出，确认 `SubState=exited`、`Result=success`、`ExecMainStatus=0`，保存 `systemctl show` 输出及测试日志后，再运行 GR00T GPU 测试：
+等待 RL 测试命令退出，确认退出码为 0、unittest 显示 `OK`，并检查 `logs/gpu-tests/` 中的报告，再运行 GR00T GPU 测试：
 
 ```bash
-GROOT_UNIT="lab-gpu-groot-$(date +%s)"
-systemd-run --user --unit="$GROOT_UNIT" \
-  --property="WorkingDirectory=$PWD" \
-  --property=Type=exec --property=RemainAfterExit=yes \
-  --setenv="LAB_GPU_SMOKE=$SFT_RUN/checkpoint-20" --setenv=LAB_GPU_SMOKE_STEPS=20 \
-  "$PWD/scripts/test.sh" groot --gpu
-
-systemctl --user show "$GROOT_UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
-journalctl --user -u "$GROOT_UNIT" -f
+LAB_GPU_SMOKE="$SFT_RUN/checkpoint-20" LAB_GPU_SMOKE_STEPS=20 \
+  scripts/test.sh groot --gpu
 ```
 
-`RemainAfterExit=yes` 会让成功结束的服务保留 `ActiveState=active`、`SubState=exited`；不能只看 active 判断测试仍在运行。失败时检查 `Result`、退出码和 journal。每套测试都应先记录结果，再用 `systemctl --user stop "$RL_UNIT"` 或 `systemctl --user stop "$GROOT_UNIT"` 清理服务；主动 stop 可能改变结果字段，因此 stop 后的状态不能替代原始完成证据。两套 GPU 测试顺序运行，避免与训练同时占用 GPU。
+同样确认 GR00T 测试退出码为 0、unittest 显示 `OK`，并检查报告。两套 GPU 测试顺序运行，避免与训练同时占用 GPU。
 
-检查其他 checkpoint 时相应修改 `--setenv=LAB_GPU_*`，SFT 同时指定精确的预期步数 `LAB_GPU_SMOKE_STEPS`。单项测试同样先确认 `Linger=yes`，再通过 `systemd-run --user` 托管，并保留该项所需的产物变量：将服务命令替换为 `bash -c 'source scripts/env.sh; exec "$RL_PY" -m unittest tests.rl.test_gpu_actor'`；GR00T 项使用 `$GROOT_PY`。
+检查其他 checkpoint 时相应修改 `LAB_GPU_*` 环境变量，SFT 同时指定精确的预期步数 `LAB_GPU_SMOKE_STEPS`。单项测试保留该项所需的产物变量，然后执行 `source scripts/env.sh` 和 `"$RL_PY" -m unittest tests.rl.test_gpu_actor`；GR00T 项使用 `$GROOT_PY`。变量需通过 `export` 或命令前赋值传给测试进程。
 
-Arena worker 可独立指定环境数和查看器。在上述临时服务中将命令替换为以下内容，并为每组指定不同的输出文件：
+Arena worker 可独立指定环境数和查看器，直接执行以下命令，并为每组指定不同的输出文件：
 
 ```bash
-bash -c '
+(
   source scripts/env.sh
   mkdir -p "$LAB_ROOT/logs/gpu-tests"
-  export LD_LIBRARY_PATH="$("$RL_PY" -c "import sysconfig; print(sysconfig.get_path(\"purelib\"))")/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH="$("$RL_PY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   cd "$ARENA_ROOT"
-  exec "$RL_PY" -m tests.rl.test_gpu_arena \
+  "$RL_PY" -m tests.rl.test_gpu_arena \
     --num-envs 4 --output "$LAB_ROOT/logs/gpu-tests/arena-4.json"
-'
+)
 ```
 
 并行环境与 Viser 的 GPU 回归顺序运行 `--num-envs 2`、`--num-envs 4`、`--num-envs 2 --viser-envs 1` 三组。`--device cuda:0` 可切换为 GPU PhysX；`--legacy-factory` 检查 legacy adapter。独立 worker 与默认 unittest 入口均检查只在第 0 个环境注入成功、跌倒、超时和掉箱信号，其余环境不应误触发。

@@ -53,6 +53,6 @@ scripts/test.sh all
 
 bootstrap 初始化递归子模块并安装三套环境；详见 [环境准备](docs/setup.md)。已有环境可先运行测试。默认测试含 CUDA/FSDP 检查。
 
-按流程继续：[数据准备](docs/data.md) → [SFT](docs/sft.md) 或 [PPO](docs/rl.md) → [导出与评测](docs/eval.md)。训练、数据生成和评测须按各文档使用 `systemd --user` 临时服务托管，先确认 `Linger=yes`，不设置开机启动。
+按流程继续：[数据准备](docs/data.md) → [SFT](docs/sft.md) 或 [PPO](docs/rl.md) → [导出与评测](docs/eval.md)。
 
 [调试与可视化](docs/debugging.md) 说明 VSCode 双端调试、训练 attach 和远程查看器；[测试说明](docs/testing.md) 列出 GPU 回归所需产物与运行方式。

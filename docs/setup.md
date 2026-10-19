@@ -47,23 +47,3 @@ scripts/test.sh all
 `scripts/env.sh` 从自身位置推导 `LAB_ROOT`，导出三套解释器和第三方目录变量。它将 Hugging Face 缓存放到 `cache/huggingface`，临时运行目录放到 `tmp/runtime`，仿真资产缓存和 Recorder 日志链接到 `data/`。其他脚本共用这一布局，无需按主机修改路径。
 
 `scripts/test.sh all` 会顺序运行三套环境的普通测试，其中包含 CUDA/FSDP 检查；GPU 模型与仿真验收另见 [测试说明](testing.md)。改动或移动工作目录后应重建 venv，因为 venv 中包含绝对路径。
-
-## 持续任务托管
-
-训练、数据生成、评测和 GPU 回归由 `systemd --user` 临时服务托管。先执行：
-
-```bash
-loginctl show-user "$USER" -p Linger
-```
-
-必须返回 `Linger=yes`；否则先执行 `loginctl enable-linger "$USER"`，然后重新确认。各阶段文档给出具体服务命令，不执行 `systemctl enable`。`--property=RemainAfterExit=yes` 让服务结束后仍可读取真实退出状态；成功时显示 `Result=success`、`ExecMainStatus=0`，即使 `ActiveState=active` 也不代表进程仍在计算，要同时查看 `SubState=exited`。
-
-使用文档中的实际 `UNIT` 查看或停止任务：
-
-```bash
-systemctl --user show "$UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
-journalctl --user -u "$UNIT" -f
-systemctl --user stop "$UNIT"
-```
-
-先记录退出状态再 stop；停止后 transient unit 可能被回收，不能把 not-found 状态当作成功证据。服务的标准输出进入 journal；需要长期保留时按流程示例写到 `logs/`。不要用终端后台或 `nohup` 替代托管。
