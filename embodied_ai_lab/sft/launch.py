@@ -113,7 +113,7 @@ def main(argv=None):
         command = build_command(
             recipe, lab_root=lab_root, python=sys.executable,
             num_gpus=torch.cuda.device_count(), per_device_batch=args.per_device_batch,
-            extra_args=extra_args, debug=os.environ.get("TRAIN_DEBUG") == "1",
+            extra_args=extra_args, debug=os.environ.get("SFT_DEBUG") == "1",
         )
     except ValueError as error:
         parser.error(str(error))

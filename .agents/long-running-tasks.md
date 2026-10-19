@@ -48,7 +48,7 @@ systemd-run --user --unit="$UNIT" \
 
 使用临时 service，不使用 scope，不执行 `systemctl enable`。`Type=exec` 确认入口成功执行，但提交成功不代表业务完成。默认按整个 cgroup 停止子进程，保持服务器、仿真和监控进程随所属任务一起清理；停止超时可按任务需要调整。
 
-服务不会自动继承调用 shell 的环境变量。将业务所需变量逐项通过 `--setenv=NAME=value` 传入，例如 `TRAIN_DEBUG`、`RL_DEBUG`、`LAB_GPU_*`、`EVAL_RL_SERVER`、`PUBLIC_IP`；业务脚本仍负责加载 `scripts/env.sh`。输出、数据、checkpoint 等路径按业务入口要求传入，避免入口切换目录后相对路径指向错误位置。
+服务不会自动继承调用 shell 的环境变量。将业务所需变量逐项通过 `--setenv=NAME=value` 传入，例如 `SFT_DEBUG`、`RL_DEBUG`、`LAB_GPU_*`、`EVAL_RL_SERVER`、`PUBLIC_IP`；业务脚本仍负责加载 `scripts/env.sh`。输出、数据、checkpoint 等路径按业务入口要求传入，避免入口切换目录后相对路径指向错误位置。
 
 需要 shell 运算或串行流水线时，以 `/usr/bin/bash -c '命令一 && 命令二'` 为入口；通过环境变量或位置参数传值，保持参数引用。若命令带有 `tee` 等管道，使用 `/usr/bin/bash -o pipefail -c '...'`，避免后续命令成功掩盖业务失败。
 

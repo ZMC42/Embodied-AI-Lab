@@ -2,7 +2,7 @@
 
 先完成 [环境准备](setup.md)，准备 `models/GR00T-N1.6-G1/checkpoint-20000`，模型下载见 [评测说明](eval.md)。使用 `.venvs/rl`，配置位于 `configs/rl/locomanip/`，入口为 `scripts/train/rl.sh <recipe> [Hydra overrides...]`；省略 recipe 时选择 `ppo-offload`。
 
-需要 VSCode 断点时，按 [RL / PPO 调试流程](debugging.md#rl--ppo) 用 `RL_DEBUG=driver|actor|rollout|env` 选择本次角色，并连接对应 attach 配置；`TRAIN_DEBUG=1` 仅用于 SFT。
+需要 VSCode 断点时，按 [RL / PPO 调试流程](debugging.md#rl--ppo) 用 `RL_DEBUG=driver|actor|rollout|env` 选择本次角色，并连接对应 attach 配置；`SFT_DEBUG=1` 仅用于 SFT。
 
 ## 配置与实现
 

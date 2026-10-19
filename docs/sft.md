@@ -49,4 +49,4 @@ LAB_GPU_SMOKE="$RUN_DIR/checkpoint-20" LAB_GPU_SMOKE_STEPS=20 \
 
 检查训练步数、保存状态、冻结与更新权重，以及 LeRobot episode 0/49/99 第 100 帧的推理。数据必须包含这些帧，检查不测闭环成功率。模型使用 31 维状态、35 维动作、50 步动作块；processor 补齐到 128 维，loss mask 只覆盖有效动作维度，原始 Parquet 的 43 维关节向量不能直接视为模型动作。
 
-入口参数可用 `scripts/train/sft.sh --help` 查看；上游 CLI 的全部选项由 GR00T 定义。`TRAIN_DEBUG=1` 在训练进程启动 debugpy 并等待连接，使用方法见 [训练断点调试](debugging.md#训练断点调试)。
+入口参数可用 `scripts/train/sft.sh --help` 查看；上游 CLI 的全部选项由 GR00T 定义。`SFT_DEBUG=1` 在训练进程启动 debugpy 并等待连接，使用方法见 [训练断点调试](debugging.md#训练断点调试)。

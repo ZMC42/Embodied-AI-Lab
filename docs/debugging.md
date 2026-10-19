@@ -22,7 +22,7 @@
 使用单张可见 GPU、smoke 配方和新输出目录。在终端中启动训练：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 TRAIN_DEBUG=1 scripts/train/sft.sh smoke -- \
+CUDA_VISIBLE_DEVICES=0 SFT_DEBUG=1 scripts/train/sft.sh smoke -- \
   --output-dir "$PWD/models/sft-debug-$(date +%Y%m%d-%H%M%S)" \
   --max-steps 2 --save-steps 2
 ```
@@ -33,7 +33,7 @@ CUDA_VISIBLE_DEVICES=0 TRAIN_DEBUG=1 scripts/train/sft.sh smoke -- \
 
 ### RL / PPO
 
-RL 使用 `.venvs/rl`。安装脚本已包含 `debugpy`；已有环境若尚未安装，执行 `uv pip install --python .venvs/rl/bin/python --no-deps 'debugpy==1.8.21'`。`TRAIN_DEBUG=1` 仍只用于 SFT；RL 用 `RL_DEBUG` 选择本次要调试的一个进程：
+RL 使用 `.venvs/rl`。安装脚本已包含 `debugpy`；已有环境若尚未安装，执行 `uv pip install --python .venvs/rl/bin/python --no-deps 'debugpy==1.8.21'`。`SFT_DEBUG=1` 仍只用于 SFT；RL 用 `RL_DEBUG` 选择本次要调试的一个进程：
 
 | RL_DEBUG | VSCode 配置 | loopback 端口 | 等待位置与可用断点 |
 | --- | --- | --- | --- |
