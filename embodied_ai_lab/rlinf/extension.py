@@ -68,8 +68,10 @@ def predict_micro_batches(predict, env_obs, batch_size, **kwargs):
 
 
 def build_model(cfg, torch_dtype=torch.bfloat16):
+    from embodied_ai_lab.rlinf.debugging import wait_for_model_debugger
     from rlinf.models.embodiment.gr00t.gr00t_n1d6 import get_model
 
+    wait_for_model_debugger()
     # 冻结基座始终 BF16；actor 的 FP32 仅用于可训练主权重。
     model = get_model(cfg, torch.bfloat16)
     model.requires_grad_(False)

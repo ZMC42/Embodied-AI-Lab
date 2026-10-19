@@ -8,7 +8,12 @@ import gymnasium as gym
 from rlinf.envs.sim.isaaclab.venv import SubProcIsaacLabEnv
 
 
-def make_sim(cfg, num_envs, seed):
+def make_sim(cfg, num_envs, seed, debug=False):
+    if debug:
+        from embodied_ai_lab.rlinf.debugging import wait_for_debugger
+
+        wait_for_debugger("env")
+
     from isaaclab.app import AppLauncher
 
     launcher_kwargs = {}
@@ -64,7 +69,10 @@ class ArenaEnv(gym.Env):
         self.cfg = cfg
         self.num_envs = num_envs
         self.seed = cfg.seed + seed_offset
-        self.env = SubProcIsaacLabEnv(partial(make_sim, cfg, num_envs, self.seed))
+        self.env = SubProcIsaacLabEnv(partial(
+            make_sim, cfg, num_envs, self.seed,
+            debug=seed_offset == 0 and not cfg.is_eval,
+        ))
         self._is_start = True
 
     def reset(self, seed=None, env_ids=None):

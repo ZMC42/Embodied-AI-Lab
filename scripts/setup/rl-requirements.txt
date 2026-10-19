@@ -64,6 +64,7 @@ cyclopts==4.25.2
 daqp==0.8.5
 dash==4.4.1
 datasets==3.6.0
+debugpy==1.8.21
 decorator==4.4.2
 dex-retargeting==0.5.0
 diffusers==0.35.1

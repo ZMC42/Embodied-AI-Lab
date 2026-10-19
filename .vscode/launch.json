@@ -2,12 +2,56 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "GR00T N1.6 training (attach)",
+      "name": "GR00T N1.6 SFT training (attach)",
       "type": "debugpy",
       "request": "attach",
       "connect": {
         "host": "127.0.0.1",
         "port": 5678
+      },
+      "justMyCode": false,
+      "subProcess": false
+    },
+    {
+      "name": "RLinf PPO driver (attach)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5679
+      },
+      "justMyCode": false,
+      "subProcess": false
+    },
+    {
+      "name": "RLinf PPO actor (attach)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5680
+      },
+      "justMyCode": false,
+      "subProcess": false
+    },
+    {
+      "name": "RLinf PPO rollout (attach)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5681
+      },
+      "justMyCode": false,
+      "subProcess": false
+    },
+    {
+      "name": "RLinf PPO env (attach)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5682
       },
       "justMyCode": false,
       "subProcess": false

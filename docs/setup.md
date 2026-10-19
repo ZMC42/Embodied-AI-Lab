@@ -29,7 +29,7 @@ scripts/setup/venv-rl.sh
 | --- | --- |
 | arena | Arena 的 frozen lockfile、dev extra、gr00t-client group；先装 `cmake<4` 与 `egl-probe==1.0.2`，再装 debugpy、Viser 及已验证版本的附加依赖 |
 | groot | Arena 内嵌 GR00T 的 `uv sync --python 3.10`，再装 debugpy；编译扩展使用 CUDA toolkit |
-| rl | Arena 的 `uv sync --frozen --inexact`，用 `--no-deps` 安装 `scripts/setup/rl-requirements.txt`（包含 `viser==1.1.1` 及其依赖），再 editable 安装 RLinf 和 GR00T reference |
+| rl | Arena 的 `uv sync --frozen --inexact`，用 `--no-deps` 安装 `scripts/setup/rl-requirements.txt`（包含 `debugpy==1.8.21`、`viser==1.1.1` 及其依赖），再 editable 安装 RLinf 和 GR00T reference |
 
 RL freeze 包含与 GR00T 包元数据不同的 torch、NumPy 等已验证版本，因此安装使用 `--no-deps`。不要在 RL 环境中额外同步 GR00T 的依赖声明。
 

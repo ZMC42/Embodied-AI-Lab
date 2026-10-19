@@ -17,6 +17,8 @@
 
 ## 训练断点调试
 
+### SFT
+
 使用单张可见 GPU、smoke 配方和新输出目录。先确认 `Linger=yes`，将训练托管到临时 user service：
 
 ```bash
@@ -29,9 +31,51 @@ systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
   --max-steps 2 --save-steps 2
 ```
 
-在 VSCode 选择 `GR00T N1.6 training (attach)`，连接远程机器本地 `127.0.0.1:5678`。该端口只绑定 loopback；Remote SSH 中调试器运行在远程机器。smoke 的 loader workers=0，使样本处理留在训练进程。可在数据集的 `extract_step_data()`、`Gr00tN1d6.forward()`、`Gr00tN1d6ActionHead.forward()` 和 Transformers `Trainer.training_step()` 下断点。
+在 VSCode 选择 `GR00T N1.6 SFT training (attach)`，连接远程机器本地 `127.0.0.1:5678`。该端口只绑定 loopback；Remote SSH 中调试器运行在远程机器。smoke 的 loader workers=0，使样本处理留在训练进程。可在数据集的 `extract_step_data()`、`Gr00tN1d6.forward()`、`Gr00tN1d6ActionHead.forward()` 和 Transformers `Trainer.training_step()` 下断点。
 
 断开 attach 后训练继续；停止训练使用 `systemctl --user stop "$UNIT"`。日志为 `logs/train-sft/smoke.log`，也可 `journalctl --user -u "$UNIT" -f`。不要同时启动两个等待 5678 的任务。
+
+### RL / PPO
+
+RL 使用 `.venvs/rl`。安装脚本已包含 `debugpy`；已有环境若尚未安装，执行 `uv pip install --python .venvs/rl/bin/python --no-deps 'debugpy==1.8.21'`。`TRAIN_DEBUG=1` 仍只用于 SFT；RL 用 `RL_DEBUG` 选择本次要调试的一个进程：
+
+| RL_DEBUG | VSCode 配置 | loopback 端口 | 等待位置与可用断点 |
+| --- | --- | --- | --- |
+| `driver` | `RLinf PPO driver (attach)` | 5679 | 进入上游训练入口前；`EmbodiedRunner.run()`、`init_workers()`、调度与保存 |
+| `actor` | `RLinf PPO actor (attach)` | 5680 | rank 0 的模型工厂加载模型前；`build_model()`、`compute_advantages_and_returns()`、`train_micro_batch()`、PPO loss |
+| `rollout` | `RLinf PPO rollout (attach)` | 5681 | rank 0 的模型工厂加载模型前；`predict_g1()`、`get_rl_action()`、`predict_micro_batches()` |
+| `env` | `RLinf PPO env (attach)` | 5682 | 首个训练仿真子进程启动 AppLauncher 前；`make_sim()`、`ChunkEnv.step()`、G1 动作处理与终局观测 |
+
+单次运行只选一个角色；其他进程会等待该进程继续。模型工厂根据 worker 的实际配置组名选择 actor / rollout，不要求组名固定为默认值。env 只选 `seed_offset=0` 的训练实例，排除其他 pipeline stage 和 eval 实例。这里的入门流程使用默认单卡、每组单 rank、1 个 pipeline stage，不同时启动多个调试训练。
+
+从仓库根目录启动两迭代调试短跑，先确认 `Linger=yes`，使用新目录；将 `RL_DEBUG=actor` 改成表中所需角色：
+
+```bash
+loginctl show-user "$USER" -p Linger
+# 只有 Linger=yes 才继续；否则按 setup.md 启用后重新确认。
+RUN_DIR="$PWD/logs/rl-training/debug-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$RUN_DIR"
+UNIT="lab-ppo-debug-$(date +%s)"
+systemd-run --user --unit="$UNIT" --property="WorkingDirectory=$PWD" \
+  --property=Type=exec --property=RemainAfterExit=yes --property=TimeoutStopSec=20 \
+  --setenv=CUDA_VISIBLE_DEVICES=0 --setenv=RL_DEBUG=actor \
+  "$PWD/scripts/train/rl.sh" ppo-offload \
+  "runner.logger.log_path=$RUN_DIR" runner.logger.experiment_name=train \
+  runner.max_epochs=2 runner.max_steps=2 runner.save_interval=2
+journalctl --user -u "$UNIT" -f
+```
+
+等日志出现 `[RL debug] actor pid=... waiting on 127.0.0.1:5680`（其他角色对应其名称和端口），再在 VSCode Remote SSH 选择相同角色的 attach 配置并 F5。worker 调度与导入也需要时间，端口尚未监听时不要提前 attach。端口只绑定远程机器 loopback，Remote SSH 中不需要额外转发。
+
+attach 后在相应进程文件中设置断点并继续；`justMyCode=false` 允许进入 RLinf、GR00T reference 和 Isaac Lab。driver 断点不能暂停其他 Ray worker，env worker 的父进程也不执行真实物理步。模型断点应放在 `third_party/Isaac-GR00T-reference` 或 `third_party/RLinf` 对应实现；不要放在 SFT 使用的另一份 GR00T 中。
+
+未设置 `RL_DEBUG` 时，训练不监听端口、不等待客户端，也不导入 debugpy。断开 attach 后训练继续；暂停某一进程时，其他进程等待通信是正常的，但长时间停顿仍可能触发分布式通信超时。只断开调试器不会终止服务，停止任务用 `systemctl --user stop "$UNIT"`。任务自然完成后先用以下命令记录退出状态，再清理服务，不执行 `systemctl enable`：
+
+```bash
+systemctl --user show "$UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus
+```
+
+成功应为 `SubState=exited`、`Result=success`、`ExecMainStatus=0`，并生成 `train/checkpoints/global_step_2/`。训练与产物要求仍见 [RL 两迭代短跑](rl.md#两迭代短跑)。
 
 ## 远程观察
 
