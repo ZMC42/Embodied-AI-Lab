@@ -39,16 +39,16 @@ Arena 和 RL 安装脚本均包含 `viser==1.1.1`。使用 [单局观察](eval.m
 
 RL 训练时，在 [两迭代短跑](rl.md#两迭代短跑) 的托管命令后追加 `env.train.viser_envs=1`，或用 `env.train.viser_envs=k` 最多显示 k 个环境；默认值 0 关闭查看器。端口固定为 8080，同一时间只运行一个仿真。这个开关仅用于调试短跑，正式长跑保持关闭。
 
-以下开销对照使用 2 个环境，各跑两轮，分别记录首次与稳态 rollout；整卡峰值包含保存。原始数据位于 `logs/num-envs-viser/`。
+以下开销对照使用 2 个环境，两组均运行采用新 PhysX 缓冲的最终生产 `make_sim`，无候选注入，各完成两轮和保存，分别记录首次与第 2 轮 rollout；整卡峰值包含保存。原始数据位于 `logs/num-envs-viser/`。
 
 | viser_envs | 首轮 rollout / s | 第 2 轮 rollout / s | 整卡峰值 / MiB | 相对关闭时峰值增量 / MiB |
 | --- | --- | --- | --- | --- |
-| 0 | 103.456 | 94.497 | 22935 | 0 |
-| 1 | 105.292 | 99.371 | 23389 | +454 |
+| 0 | 102.475 | 97.367 | 22103 | 0 |
+| 1 | 102.310 | 93.913 | 22359 | +256 |
 
-对应原始目录为关闭时的 `baseline-n2-retry1/` 与开启时的 `viser-n2-on/`，两组均使用原始 PhysX 缓冲。首轮 rollout 增加约 1.77%，第 2 轮增加约 5.16%；这些短跑数字未包含真实浏览器持续连接的负载，正式长跑仍保持关闭。
+对应原始目录为关闭时的 `viser-final-n2-off/` 与开启时的 `viser-final-n2-on/`，汇总见 `final-viser-comparison.json`。开启相对关闭的首轮 rollout 耗时差为 −0.16%，第 2 轮为 −3.55%，整卡峰值增加 256 MiB。每种设置仅顺序运行一次，负的耗时差按单次波动记录，不能作为加速或策略等价的证据；这些短跑数字未包含真实浏览器持续连接的负载，正式长跑仍保持关闭。
 
-训练运行期两次 HTTP GET 均返回 200；HTTP 200 只验证服务可达，浏览器中的画面仍需用户在 Mac 上实际打开确认。
+开启组在训练运行期多次 HTTP GET 均返回 200；关闭组在真实 rollout 期间确认 8080 没有监听，HTTP 连接被拒绝。HTTP 200 只验证服务可达，浏览器中的画面仍需用户在 Mac 上实际打开确认。
 
 需要完整 Kit 界面时，在同一客户端命令增加 `--viz kit --livestream 2`，通过 [Isaac Sim WebRTC Streaming Client](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/manual_livestream_clients.html) 连接机器地址。客户端需能访问 TCP 49100 和 UDP 47998，VSCode 的普通 TCP 转发无法传送 UDP 视频。
 
