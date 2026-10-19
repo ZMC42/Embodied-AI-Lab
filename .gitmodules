@@ -1,0 +1,16 @@
+[submodule "third_party/IsaacLab-Arena"]
+	path = third_party/IsaacLab-Arena
+	url = https://github.com/ZMC42/IsaacLab-Arena.git
+	branch = lab/main
+[submodule "third_party/Isaac-GR00T-reference"]
+	path = third_party/Isaac-GR00T-reference
+	url = https://github.com/ZMC42/Isaac-GR00T.git
+	branch = lab/reference
+[submodule "third_party/Isaac-GR00T-rl"]
+	path = third_party/Isaac-GR00T-rl
+	url = https://github.com/ZMC42/Isaac-GR00T.git
+	branch = lab/rl
+[submodule "third_party/RLinf"]
+	path = third_party/RLinf
+	url = https://github.com/ZMC42/RLinf.git
+	branch = lab/main

@@ -1,0 +1,22 @@
+effective_batch: 1
+per_device_batch: 1
+args:
+  base-model-path: models/GR00T-N1.6-3B
+  dataset-path: data/locomanipulation/generated/lerobot
+  modality-config-path: third_party/IsaacLab-Arena/isaaclab_arena_gr00t/embodiments/g1/g1_sim_wbc_data_config.py
+  embodiment-tag: NEW_EMBODIMENT
+  output-dir: models/GR00T-N1.6-smoke
+  max-steps: 200
+  save-steps: 200
+  save-total-limit: 1
+  tune-llm: false
+  tune-visual: false
+  tune-projector: true
+  tune-diffusion-model: true
+  tune-top-llm-layers: 0
+  model-dtype: bfloat16
+  dataloader-num-workers: 0
+  shard-size: 128
+  num-shards-per-epoch: 32
+  color-jitter-params: [brightness, 0.3, contrast, 0.4, saturation, 0.5, hue, 0.08]
+  use-wandb: false

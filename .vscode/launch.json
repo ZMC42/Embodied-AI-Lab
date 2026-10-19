@@ -1,0 +1,105 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GR00T N1.6 training (attach)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false,
+      "subProcess": false
+    },
+    {
+      "name": "GR00T N1.6 server",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venvs/groot/bin/python",
+      "program": "${workspaceFolder}/third_party/IsaacLab-Arena/submodules/Isaac-GR00T/gr00t/eval/run_gr00t_server.py",
+      "cwd": "${workspaceFolder}/third_party/IsaacLab-Arena/submodules/Isaac-GR00T",
+      "envFile": "${workspaceFolder}/.vscode/runtime.env",
+      "env": {
+        "TMPDIR": "${workspaceFolder}/tmp/runtime",
+        "HF_HOME": "${workspaceFolder}/cache/huggingface"
+      },
+      "args": [
+        "--modality-config-path",
+        "${workspaceFolder}/third_party/IsaacLab-Arena/isaaclab_arena_gr00t/embodiments/g1/g1_sim_wbc_data_config.py",
+        "--model-path",
+        "${workspaceFolder}/models/GR00T-N1.6-G1/checkpoint-20000",
+        "--embodiment-tag",
+        "NEW_EMBODIMENT",
+        "--device",
+        "cuda",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5555"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false,
+      "preLaunchTask": "prepare runtime"
+    },
+    {
+      "name": "Arena client (headless)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/.venvs/arena/bin/python",
+      "program": "${workspaceFolder}/third_party/IsaacLab-Arena/isaaclab_arena/evaluation/policy_runner.py",
+      "cwd": "${workspaceFolder}/third_party/IsaacLab-Arena",
+      "envFile": "${workspaceFolder}/.vscode/runtime.env",
+      "preLaunchTask": "wait for GR00T",
+      "env": {
+        "TMPDIR": "${workspaceFolder}/tmp/runtime",
+        "HF_HOME": "${workspaceFolder}/cache/huggingface",
+        "LD_LIBRARY_PATH": "${workspaceFolder}/.venvs/arena/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:${env:LD_LIBRARY_PATH}"
+      },
+      "args": [
+        "--policy_type",
+        "isaaclab_arena_gr00t.policy.gr00t_remote_closedloop_policy.Gr00tRemoteClosedloopPolicy",
+        "--policy_config_yaml_path",
+        "isaaclab_arena_gr00t/policy/config/g1_locomanip_gr00t_closedloop_config.yaml",
+        "--remote_host",
+        "127.0.0.1",
+        "--remote_port",
+        "5555",
+        "--num_episodes",
+        "1",
+        "--num_envs",
+        "1",
+        "--seed",
+        "42",
+        "--enable_cameras",
+        "--device",
+        "cpu",
+        "--policy_device",
+        "cuda",
+        "--kit_args=--/log/file=${workspaceFolder}/logs/debug-kit.log",
+        "--output_base_dir",
+        "${workspaceFolder}/logs/debug",
+        "galileo_g1_locomanip_pick_and_place",
+        "--object",
+        "brown_box",
+        "--embodiment",
+        "g1_wbc_joint"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": false
+    }
+  ],
+  "compounds": [
+    {
+      "name": "GR00T server + Arena client",
+      "preLaunchTask": "prepare runtime",
+      "configurations": [
+        "GR00T N1.6 server",
+        "Arena client (headless)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

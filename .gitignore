@@ -1,0 +1,10 @@
+tmp/
+private/
+.env
+.venvs/
+/data
+/models
+/logs
+/cache
+__pycache__/
+.ruff_cache/

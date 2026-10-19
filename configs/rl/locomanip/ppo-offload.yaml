@@ -1,0 +1,30 @@
+defaults:
+- ppo
+# 按桶传权重，避免大量可训练参数产生稀疏patch索引峰值。
+- override /weight_syncer@weight_syncer: bucket_syncer
+- _self_
+runner:
+  # 保存周期以训练迭代数计；按实际吞吐调整。
+  save_interval: 125
+algorithm:
+  update_epoch: 4
+  log_epoch_metrics: true
+actor:
+  enable_offload: true
+  # 单样本前向，避免BF16下随机重组批次改变chunk log-prob。
+  micro_batch_size: 1
+  # 2环境×30动作块，每个 update epoch 累计后更新一次。
+  global_batch_size: 60
+  model:
+    train_last_blocks: 1
+    inference_micro_batch_size: 1
+    precision: fp32
+  fsdp_config:
+    mixed_precision:
+      param_dtype: bf16
+      reduce_dtype: fp32
+      buffer_dtype: bf16
+rollout:
+  enable_offload: true
+  model:
+    precision: bf16
