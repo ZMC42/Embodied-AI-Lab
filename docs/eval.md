@@ -42,6 +42,36 @@ scripts/eval/baseline.sh "$RUN_DIR" both 100 5
 
 成功使用 Arena 原生 success 信号。失败分类优先记录官方掉箱终止，再区分已抬起但未放入、接近但未抬起、未接近；接近用底盘距箱子初始 XY ≤0.5 m 作为导航代理。抬起 predicate 仅表示官方进度条件，reset 后箱体回弹也可能触发。`fall_once` 是骨盆相对默认站立位置下降超过 0.4 m 的独立诊断，不改变成功判定。汇总使用 Wilson 95% 区间，记录 CPU/GPU 区间是否重叠；不能把不同协议的结果直接比较。
 
+## 对比 SFT 与 RL checkpoint
+
+`scripts/eval/compare-checkpoints.sh SFT_CHECKPOINT RL_WEIGHTS [gpu|cpu|both] [episodes] [num_envs] [seed] [output_dir]` 依次完成 RL 导出、SFT 评测、RL 评测和指标汇总。SFT 路径必须是 RL 训练的实际起点；导出以该目录为基座，保留它的 processor 和归一化统计量。两次评测统一使用 reference/SDPA、BF16、逐样本推理。
+
+```bash
+scripts/eval/compare-checkpoints.sh \
+  "$PWD/models/GR00T-N1.6-g1-full/checkpoint-20000" \
+  "$PWD/logs/rl-training/your-run/train/checkpoints/global_step_125/actor/model_state_dict/full_weights.pt" \
+  gpu 100 5 2000
+```
+
+默认 GPU 物理、每个模型 100 局、5 个环境、seed 2000；改成 `both` 会顺序评测两个物理后端，每个模型每个后端各 100 局。需要快速检查流程时可将局数改为 5。任一步失败即停止，使用新的输出目录重新运行。
+
+导出模型保存在 `models/rl-export-<timestamp>/`。默认评测目录为 `logs/checkpoint-eval/<timestamp>/`，可用最后一个参数指定不存在的新目录：
+
+| 产物 | 内容 |
+| --- | --- |
+| `sft/<backend>/`、`rl/<backend>/` | 各模型的逐局记录、协议与完成凭证 |
+| `comparison.json` | 每个后端的两模型统计、失败分类、耗时与成功率差值（RL − SFT，0.1 表示增加 10 个百分点） |
+| `report.md` | 成功数、成功率、Wilson 95% 区间、摔倒率、耗时和失败分类 |
+
+统计与报告生成由 `embodied_ai_lab.eval.compare_checkpoints` 模块负责。已有完整评测记录时，可以单独重新生成汇总，无需再次运行仿真：
+
+```bash
+python3 -m embodied_ai_lab.eval.compare_checkpoints \
+  logs/checkpoint-eval/你的评测目录 gpu
+```
+
+脚本退出码为 0 且生成最终报告，表示两模型均已完成评测与汇总。成功率差值只描述本次结果；各模型的 Wilson 区间不等同于差值置信区间。筛选多个 checkpoint 时使用验证条件，最终比较另用未参与筛选的测试条件。
+
 ## 单局观察
 
 `groot-server.sh` 固定加载默认 G1 checkpoint，监听 `127.0.0.1:5555`；`arena.sh` 等待服务器就绪后执行 1 个 episode、1 个环境、seed 42、CPU 物理。在两个终端中分别运行，均从仓库根目录启动。
