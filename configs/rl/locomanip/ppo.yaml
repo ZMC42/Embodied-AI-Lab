@@ -67,6 +67,8 @@ env:
     auto_reset: true
     env_type: isaaclab
     seed: 1000
+    physics_backend: isaacsim_physx
+    physics_log_dir: ${runner.logger.log_path}/${runner.logger.experiment_name}/physics
     device: cuda:0
     task: galileo_g1_locomanip_pick_and_place_rl
     ignore_terminations: false
@@ -85,6 +87,7 @@ env:
     use_fixed_reset_state_ids: false
     is_eval: false
   eval:
+    viser_envs: 0
     rollout_epoch: 1
     use_rel_reward: false
     total_num_envs: 2
@@ -99,6 +102,8 @@ env:
       video_base_dir: ${runner.logger.log_path}/video/eval
     env_type: isaaclab
     seed: 2000
+    physics_backend: ${env.train.physics_backend}
+    physics_log_dir: ${env.train.physics_log_dir}
     device: cuda:0
     task: ${env.train.task}
     io_module: ${env.train.io_module}

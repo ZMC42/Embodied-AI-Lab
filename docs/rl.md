@@ -15,6 +15,8 @@
 
 冻结参数始终使用 BF16 存储。offload 配方的可训练主权重为 FP32，FSDP 前向 BF16，梯度归约 FP32，Adam 状态 FP32，rollout BF16。`actor.model.train_last_blocks=N` 调整末尾 DiT block 数。`actor.micro_batch_size=1` 和 `actor.model.inference_micro_batch_size=1` 需一并保留，避免 BF16 下重组 batch 改变 chunk log-prob。
 
+`ppo-offload` 保存 checkpoint 时先将 FSDP 张量搬到 CPU；分桶同步通过 FSDP 完整参数上下文，只将需要同步的可训练参数和持久 buffer 复制到 CPU，避免为冻结基座额外创建完整快照。分桶同步保留原 dtype；默认 `ppo` 的 patch 同步保持原有 CUDA 导出路径。
+
 默认 seed=1000、2 个环境、50 步动作块、1500 步 episode。offload 每个 update epoch 累积 60 个动作块后更新。入口默认 `MALLOC_ARENA_MAX=2`，减少主机内存保留，为 CPU checkpoint 保存留出空间；可用同名环境变量覆盖。
 
 只解析配置，不启动训练：
@@ -25,6 +27,43 @@ scripts/train/rl.sh ppo --cfg job --resolve
 ```
 
 GR00T RL fork 的 letterbox 预处理与 reference 不同，因此实际 RL 使用 GR00T reference；fork 保留作推理对照。reference 与 RLinf 的 attention 使用 SDPA；Euler 去噪更新顺序与 BF16 舍入通过 fork 保持一致。无需再手动安装补丁。
+
+## 物理后端与设备
+
+`env.train.physics_backend` 与 `env.eval.physics_backend` 选择物理引擎，`device` 单独选择物理执行设备：
+
+| 后端 | 执行设备 | Arena 内部 preset |
+| --- | --- | --- |
+| `isaacsim_physx`（默认） | `cpu`、`cuda:0` | `physx` |
+| `newton_mjwarp` | CUDA，例如 `cuda:0` | `newton` |
+
+`ppo` 和 `ppo-offload` 均支持这些字段。eval 的后端默认插值跟随 train，允许单独覆盖；train 与 eval 的设备各自默认 `cuda:0`，修改训练设备不会修改 eval 设备。模型推理和相机仍按原配置使用 GPU。
+
+```bash
+# Newton 训练和内置 eval。
+scripts/train/rl.sh ppo-offload env.train.physics_backend=newton_mjwarp
+
+# Newton 训练，PhysX 内置 eval。
+scripts/train/rl.sh ppo-offload \
+  env.train.physics_backend=newton_mjwarp \
+  env.eval.physics_backend=isaacsim_physx
+
+# PhysX CPU 训练，Newton GPU 内置 eval。
+scripts/train/rl.sh ppo-offload env.train.device=cpu \
+  env.eval.physics_backend=newton_mjwarp env.eval.device=cuda:0
+```
+
+配置保存在 `configs/rl/locomanip/ppo.yaml`，环境入口为 `embodied_ai_lab/rlinf/env.py`。后端在创建仿真子进程前确定；修改配置后通过新环境进程切换。`arena_args` 中与结构化字段相同的旧 `--presets` / `--physics-backend` 会被移除，冲突则报错；项目命令统一使用上述结构化字段。
+
+入口先等待 train/eval 仿真全部初始化，再依次加载 rollout 和 actor 模型，避免 Newton 场景构建的主存峰值与模型加载重叠；恢复 checkpoint 的加载仍在全部 worker 就绪后执行。
+
+训练在 `${runner.logger.log_path}/${runner.logger.experiment_name}/physics/` 写入记录：`run.json` 包含来源 checkpoint、来源及当前 train/eval 后端；`config.yaml` 保存解析后的配置；`train-worker_*-pid_*.json` 和 `eval-worker_*-pid_*.json` 由仿真进程记录实际后端、物理设备、配置和 manager、求解器参数、步长、相机与包版本。`newton_solver_sha256` 用于区分同版本 Newton solver 的源码变化。对应下方短跑示例的路径为 `$RUN_DIR/train/physics/`。
+
+Newton 的真实训练和跨后端恢复尚未通过整套运行验收。RTX 4090 24 GiB 上，PhysX train/eval 同时使用 GPU 物理的短跑曾在第二轮 rollout 出现 GPU page fault / device lost，采样峰值 23979 MiB；现有证据不能确定是容量还是生命周期问题。可独立设置 PhysX 角色的 `device=cpu`，相机与模型仍使用 GPU。下面已有的容量实测来自未启用内置 eval 的 PhysX 运行，不能外推到两个仿真进程同时驻留。
+
+本机两个 Newton 仿真同时驻留时，分别占用约 6.81/7.06 GiB 显存。串行初始化可跨过场景构建的主存峰值，但 actor 的 FSDP flatten 随后需要额外 3.48 GiB，此时仅余 1.77 GiB，明确超出本机 24 GiB 显存容量。该组合尚未完成训练；可单独选择 PhysX CPU eval 减少驻留开销，或在更大显存机器上验证双 Newton 组合。
+
+Newton GPU train + PhysX CPU eval 的后续短跑虽然将显存峰值降至 20219 MiB，仍在首次权重同步时触发主存保护（约 59.74/62.64 GB），未完成任何 PPO 更新或 checkpoint 保存。因此本机这套配方的 Newton 训练仍未跑通，独立仿真与闭环评测通过不能替代训练验收。
 
 ## 并行环境数
 
@@ -56,7 +95,7 @@ scripts/train/rl.sh env.train.total_num_envs=4 --cfg job --resolve
 
 ### PhysX 缓冲与验收范围
 
-`make_sim` 在 `gym.make` 前将 `env_cfg.sim.physics` 下的 `gpu_found_lost_pairs_capacity`、`gpu_found_lost_aggregate_pairs_capacity`、`gpu_total_aggregate_pairs_capacity` 统一设为 65536，对所有环境数生效；其余 8 个 `gpu_*` 字段保持原值，不增加配置开关。
+`make_sim` 在 `gym.make` 前，仅对 `PhysxCfg` 将 `env_cfg.sim.physics` 下的 `gpu_found_lost_pairs_capacity`、`gpu_found_lost_aggregate_pairs_capacity`、`gpu_total_aggregate_pairs_capacity` 统一设为 65536，对所有环境数生效；其余 8 个 `gpu_*` 字段保持原值，不增加配置开关。Newton 使用自己的后端参数。
 
 4env 分阶段剖析中，CUDA 初始化和 AppLauncher 后的仿真进程显存没有变化；`gym.make` 后从 7247 降至 6703 MiB，首次 reset/render 后从 7249 降至 6705 MiB，两阶段均节省 544 MiB，整卡采样峰值差为 546 MiB，达到 500 MiB 的采用门槛。对应 `torch.cuda.memory_reserved` 两组均为 22 MiB。候选训练的 2env、4env 整卡峰值分别比原始缓冲低 850、1048 MiB；这是完整训练峰值的另一口径，不能全部归因于缓冲，也不能当作可保证的节省量。
 
@@ -91,11 +130,13 @@ set -o pipefail
 | 完整模型权重 | `train/checkpoints/global_step_2/actor/model_state_dict/full_weights.pt` |
 | DCP 优化器等恢复状态 | `train/checkpoints/global_step_2/actor/dcp_checkpoint/` |
 
-监控统计整卡显存总和，不是单进程显存。CPU 物理使用 `env.train.device=cpu`；默认物理设备为 `cuda:0`。正式训练需显式设置 `runner.max_epochs`、`runner.max_steps` 和 `runner.save_interval`。
+监控统计整卡显存总和，不是单进程显存。PhysX CPU 物理使用 `env.train.device=cpu`；默认物理设备为 `cuda:0`。正式训练需显式设置 `runner.max_epochs`、`runner.max_steps` 和 `runner.save_interval`。
 
 ## 恢复与指标
 
 在上述训练参数末尾、日志管道之前追加 `"runner.resume_dir=$PREVIOUS_RUN/train/checkpoints/global_step_2"` 恢复；`PREVIOUS_RUN` 指向旧的运行目录，新运行使用不同的 `RUN_DIR`。resume_dir 指到 `global_step_N`，保持模型、训练范围、环境数和 batch 一致，将 max_epochs、max_steps 设置为恢复后的目标总步数。恢复模型、优化器和 scheduler，不保证仿真轨迹逐位续接。
+
+恢复时由本次配置决定后端，允许 PhysX 与 Newton 双向切换，保留优化器和训练步数；仿真及 WBC 状态重新初始化。例如在恢复参数后追加 `env.train.physics_backend=newton_mjwarp`，内置 eval 默认随之切换，也可单独覆盖。`physics/run.json` 记录来源与当前后端，旧 checkpoint 缺少来源信息时记为 `unknown`，仍允许恢复。导出后的模型也可在独立推理和评测中选择本次后端。
 
 offload 配方启用 `algorithm.log_epoch_metrics`，记录 `actor/epoch_1..N/{clip_fraction,approx_kl,ratio,valid_count}` 和剔除 epoch1 的 `actor/epoch_ge_2/*`。按 PPO 实际广播后的有效 loss_mask 元素数加权，跨 rank 求和再相除；全零 mask 的整组均值为 NaN。`approx_kl` 使用有符号的 `-mean(log_ratio)`，`clip_fraction` 沿用上游考虑 advantage 的裁剪判定。原有跨 epoch 聚合指标保持原口径。
 

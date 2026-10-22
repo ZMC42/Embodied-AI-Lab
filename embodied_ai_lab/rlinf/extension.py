@@ -2,8 +2,33 @@
 
 from contextlib import contextmanager
 from functools import partial
+from itertools import chain
+from pathlib import Path
 
 import torch
+
+
+def install_serial_worker_initialization():
+    """先完成仿真构建，再加载模型，避免初始化主存峰值重叠。"""
+    from rlinf.runners.embodied_runner import EmbodiedRunner
+    from rlinf.utils.checkpoint import parse_global_step_from_checkpoint_path
+
+    def init_workers(self):
+        self.env.init_worker().wait()
+        self.rollout.init_worker().wait()
+        if self.reward is not None:
+            self.reward.init_worker().wait()
+        self.actor.init_worker().wait()
+        resume_dir = self.cfg.runner.get("resume_dir", None)
+        if resume_dir is None:
+            return
+        self.logger.info(f"Resuming training from checkpoint directory {resume_dir}.")
+        self.global_step = parse_global_step_from_checkpoint_path(resume_dir)
+        actor_checkpoint = Path(resume_dir) / "actor"
+        assert actor_checkpoint.exists(), f"resume_dir {actor_checkpoint} does not exist."
+        self.actor.load_checkpoint(str(actor_checkpoint)).wait()
+
+    EmbodiedRunner.init_workers = init_workers
 
 
 @contextmanager
@@ -25,17 +50,38 @@ def cpu_checkpoint_state_dict(model):
             handle.remove()
 
 
-def install_checkpoint_cpu_clone():
-    """在 driver 复制 Ray worker 类之前安装，仅影响 checkpoint 保存。"""
+def install_cpu_state_dict_exports():
+    """保存及 offload 分桶同步从 CPU 导出，避免整份 CUDA 克隆。"""
+    from rlinf.hybrid_engines.weight_syncer import BucketWeightSyncer
     from rlinf.workers.actor.embodied_fsdp_actor_worker import EmbodiedFSDPActor
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
     original_save = EmbodiedFSDPActor.save_checkpoint
+    original_rollout_state = EmbodiedFSDPActor.get_rollout_state_dict
 
     def save_checkpoint(self, save_path, step=0):
         with cpu_checkpoint_state_dict(self.model):
             return original_save(self, save_path, step)
 
+    def get_rollout_state_dict(self):
+        if not self.enable_offload or not isinstance(self.weight_syncer, BucketWeightSyncer):
+            return original_rollout_state(self)
+        # Summoning exposes canonical names and full-precision trainable weights
+        # without state_dict cloning the frozen backbone on either GPU or CPU.
+        with FSDP.summon_full_params(self.model, writeback=False):
+            tensors = dict(chain(
+                self.model.named_parameters(remove_duplicate=False),
+                self.model.named_buffers(remove_duplicate=False),
+            ))
+            # Match FSDP state_dict's original buffer dtype after mixed-precision
+            # forward has cast live buffers. Parameters already have master dtype.
+            buffer_dtypes = self.model._buffer_name_to_orig_dtype
+            return {name: tensors[name].detach().to(
+                        device="cpu", dtype=buffer_dtypes.get(name, tensors[name].dtype), copy=True)
+                    for name in self.param_names_need_sync}
+
     EmbodiedFSDPActor.save_checkpoint = save_checkpoint
+    EmbodiedFSDPActor.get_rollout_state_dict = get_rollout_state_dict
 
 
 def predict_g1(model, env_obs, mode="train", **kwargs):

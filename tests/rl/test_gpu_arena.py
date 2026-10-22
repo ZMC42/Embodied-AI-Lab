@@ -15,10 +15,13 @@ from urllib.request import urlopen
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--physics-backend", choices=("isaacsim_physx", "newton_mjwarp"),
+                        default="isaacsim_physx")
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--viser-envs", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--legacy-factory", action="store_true")
+    parser.add_argument("--stability-steps", type=int, default=0)
     args = parser.parse_args()
     import torch
     from omegaconf import OmegaConf
@@ -28,6 +31,7 @@ def main():
     cfg = OmegaConf.create(
         dict(
             device=args.device,
+            physics_backend=args.physics_backend,
             viser_envs=args.viser_envs,
             task="galileo_g1_locomanip_pick_and_place_rl",
             io_module="embodied_ai_lab.environments.g1_io",
@@ -46,6 +50,10 @@ def main():
         cfg.arena_args[-1] = "tests.rl.legacy_factory:LegacyLocomanipEnvironment"
     env, app = make_sim(cfg, args.num_envs, 1000)
     base = env.env
+    from isaaclab_arena.utils.physics_backend import physics_protocol
+
+    actual_physics = physics_protocol(base)
+    assert actual_physics["physics_backend"] == args.physics_backend, actual_physics
     env_zero_only = [True] + [False] * (args.num_envs - 1)
     try:
         assert str(base.device) == args.device
@@ -66,6 +74,68 @@ def main():
         actions = torch.zeros(args.num_envs, 2, 50, device=args.device)
         actions[:, :, :43] = obs["states"].to(args.device)[:, None]
         actions[:, :, 46] = 0.75
+        stability = {}
+        if args.stability_steps:
+            # Exercise WBC with real physics, without policy checkpoints or injected outcomes.
+            hold = actions[:, 0].clone()
+            minimum_height = robot.data.root_pos_w[:, 2].clone()
+            base.defer_resets = True
+
+            def advance(command, steps):
+                nonlocal minimum_height
+                for step in range(steps):
+                    _, _, terminated, truncated, _ = base.step(command)
+                    assert torch.isfinite(robot.data.root_state_w).all()
+                    assert torch.isfinite(robot.data.joint_pos).all()
+                    assert not terminated.any() and not truncated.any(), (terminated, truncated)
+                    assert not base.episode_signals()["fall_once"].any(), robot.data.root_pos_w
+                    minimum_height = torch.minimum(minimum_height, robot.data.root_pos_w[:, 2])
+                    if (step + 1) % 100 == 0:
+                        print(json.dumps({"phase_steps": step + 1,
+                                          "pelvis_z": robot.data.root_pos_w[:, 2].tolist()}), flush=True)
+
+            advance(hold, args.stability_steps)
+            camera = base.scene["robot_head_cam"].data.output["rgb"]
+            assert torch.isfinite(camera).all() and camera.max() > 0, camera.shape
+            start = robot.data.root_pos_w.clone()
+            navigate = hold.clone()
+            navigate[:, 43] = -0.15
+            advance(navigate, 100)
+            navigation_distance = torch.linalg.vector_norm(robot.data.root_pos_w[:, :2] - start[:, :2], dim=1)
+            assert (navigation_distance > 0.05).all(), navigation_distance
+            arm_ids, _ = robot.find_joints("left_shoulder_pitch_joint")
+            arm_start = robot.data.joint_pos[:, arm_ids].clone()
+            arm_command = hold.clone()
+            arm_command[:, arm_ids] += 0.2
+            advance(arm_command, 50)
+            arm_motion = (robot.data.joint_pos[:, arm_ids] - arm_start).abs()
+            assert (arm_motion > 0.05).all(), arm_motion
+            unaffected = robot.data.root_state_w[1:].clone()
+            untouched_joint = robot.data.joint_pos[1:].clone()
+            episode_length = base.episode_length_buf[1:].clone()
+            base.defer_resets = False
+            env.reset(env_ids=torch.tensor([0], device=base.device))
+            assert torch.equal(robot.data.root_state_w[1:], unaffected)
+            assert torch.equal(robot.data.joint_pos[1:], untouched_joint)
+            assert base.episode_length_buf[0] == 0
+            assert torch.equal(base.episode_length_buf[1:], episode_length)
+            assert torch.allclose(robot.data.root_pos_w[0], standing_pose[0, :3], atol=0.01)
+            contact_sensor = base.scene["contact_sensor_brown_box"]
+            contact_force = contact_sensor.data.net_forces_w.torch
+            assert torch.isfinite(contact_force).all()
+            stability = dict(
+                standing_steps=args.stability_steps,
+                minimum_pelvis_height=minimum_height.tolist(),
+                navigation_distance_m=navigation_distance.tolist(),
+                arm_joint_motion_rad=arm_motion.tolist(),
+                camera_shape=list(camera.shape),
+                independent_reset_verified=True,
+                contact_force_shape=list(contact_force.shape),
+                finite_states=True,
+            )
+            print(json.dumps({"stability": stability}), flush=True)
+            obs, _ = env.reset(seed=1000)
+            actions[:, :, :43] = obs["states"].to(args.device)[:, None]
         # 注入终止管理器的成功信号，验证真实 Lab 的 termination→reward 顺序。
         # 不把它计作自然任务成功；训练不会使用此注入。
         success_cfg = base.termination_manager.get_term_cfg("success")
@@ -102,6 +172,10 @@ def main():
         assert not trunc3.any() and not reward3.any()
         report = dict(
             device=args.device,
+            physics_backend=args.physics_backend,
+            physics_config=type(base.cfg.sim.physics).__name__,
+            actual_physics=actual_physics,
+            stability=stability,
             num_envs=args.num_envs,
             viser_envs=args.viser_envs,
             viser_http_status=viser_http_status,
@@ -137,6 +211,13 @@ class ArenaGpuTest(unittest.TestCase):
                 options = ["--legacy-factory"] if legacy else []
                 run_worker(self, __name__, "--device", "cpu", "--output", report,
                            *options, report=report)
+
+    def test_newton_g1_stability_and_independent_reset(self):
+        from tests.gpu import REPORTS, run_worker
+
+        report = REPORTS / "arena-newton-g1.json"
+        run_worker(self, __name__, "--device", "cuda:0", "--physics-backend", "newton_mjwarp",
+                   "--stability-steps", 300, "--output", report, report=report)
 
 
 if __name__ == "__main__":

@@ -72,6 +72,8 @@ def main():
     args = parser.parse_args()
     results = {backend: summarize_backend(args.run_dir / backend) for backend in ("cpu", "gpu")}
     cpu, gpu = results["cpu"], results["gpu"]
+    engine = cpu["protocol"].get("physics_backend", "isaacsim_physx")
+    assert engine == gpu["protocol"].get("physics_backend", "isaacsim_physx")
     for key in ("seed", "episodes", "num_envs", "max_episode_steps", "action_chunk_length", "checkpoint"):
         assert cpu["protocol"][key] == gpu["protocol"][key], key
     overlap = max(cpu["wilson_95_ci"][0], gpu["wilson_95_ci"][0]) <= min(cpu["wilson_95_ci"][1], gpu["wilson_95_ci"][1])
@@ -89,7 +91,7 @@ def main():
     }
     (args.run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     rows = [
-        "# 官方 N1.6 基线",
+        f"# 官方 N1.6 基线（{engine}）",
         "",
         "| 物理 | 成功数 | 成功率 | Wilson 95% CI | 摔倒数 | 摔倒比例 | rollout 耗时 |",
         "|---|---:|---:|---|---:|---:|---:|",
@@ -97,7 +99,7 @@ def main():
     for backend, result in results.items():
         lo, hi = result["wilson_95_ci"]
         rows.append(
-            f"| {backend.upper()} | {result['successes']}/{result['episodes']} | "
+            f"| {engine} / {backend.upper()} | {result['successes']}/{result['episodes']} | "
             f"{result['success_rate']:.1%} | [{lo:.1%}, {hi:.1%}] | "
             f"{result['falls']} | {result['fall_rate']:.1%} | {result['elapsed_s'] / 60:.1f} min |"
         )

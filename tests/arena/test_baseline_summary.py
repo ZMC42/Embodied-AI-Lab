@@ -1,14 +1,68 @@
 """Check statistical endpoints and mutually exclusive failure categories."""
 
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
-from embodied_ai_lab.eval import summary
+from embodied_ai_lab.eval import compare_checkpoints, summary
 
 
 class BaselineSummaryTest(unittest.TestCase):
+    def write_evaluation(self, root, name, engine):
+        model = root / name
+        directory = model / "gpu"
+        directory.mkdir(parents=True)
+        protocol = {
+            "episodes": 1, "seed": 42, "max_episode_steps": 1500,
+            "navigation_threshold_m": 0.5,
+        }
+        if engine is not None:
+            protocol["physics_backend"] = engine
+        (directory / "protocol.json").write_text(json.dumps(protocol))
+        (directory / "complete.json").write_text(json.dumps({
+            "episodes": 1, "successes": 1, "elapsed_s": 10,
+        }))
+        (directory / "episodes.jsonl").write_text(json.dumps({
+            "env_id": 0, "episode_in_env": 0, "seed": 42,
+            "episode_length": 100, "success": True, "fall_once": False,
+            "termination_terms": {"object_dropped": False}, "progress": {"events": []},
+            "min_base_box_xy_distance_m": 1,
+        }) + "\n")
+        (model / "gpu-gpu.csv").write_text("timestamp, memory.used, utilization.gpu\nnow, 200 MiB, 0 %\n")
+
+    def test_compare_checkpoints_records_engine_and_accepts_legacy_physx(self):
+        for sft_engine, rl_engine, expected in (
+            (None, None, "isaacsim_physx"),
+            (None, "isaacsim_physx", "isaacsim_physx"),
+            ("newton_mjwarp", "newton_mjwarp", "newton_mjwarp"),
+        ):
+            with self.subTest(sft=sft_engine, rl=rl_engine), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.write_evaluation(root, "sft", sft_engine)
+                self.write_evaluation(root, "rl", rl_engine)
+                with patch("sys.argv", ["compare", str(root), "gpu"]), redirect_stdout(io.StringIO()):
+                    compare_checkpoints.main()
+                report = (root / "report.md").read_text()
+                self.assertIn(f"| {expected} / GPU | SFT |", report)
+                self.assertIn(f"| {expected} / GPU | RL |", report)
+                comparison = json.loads((root / "comparison.json").read_text())
+                self.assertEqual(comparison["gpu"]["physics_backend"], expected)
+
+    def test_compare_checkpoints_rejects_mismatched_actual_physics_protocols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_evaluation(root, "sft", "isaacsim_physx")
+            self.write_evaluation(root, "rl", "newton_mjwarp")
+            with patch("sys.argv", ["compare", str(root), "gpu"]), \
+                 self.assertRaisesRegex(AssertionError, "physics backend mismatch"):
+                compare_checkpoints.main()
+            self.assertFalse((root / "report.md").exists())
+            self.assertFalse((root / "comparison.json").exists())
+
     def test_falls_are_counted_independently_of_success(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

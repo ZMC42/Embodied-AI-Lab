@@ -11,6 +11,25 @@ scripts/test.sh rl
 
 GPU 测试的前置产物和运行示例见下文。
 
+## 物理后端配置回归
+
+公开名称为 `isaacsim_physx` 与 `newton_mjwarp`；物理引擎与 `cpu` / `cuda:0` 执行设备分别配置。PhysX 支持 CPU/GPU，Newton 仅支持 CUDA。训练配置、旧 Arena 选择器消解和环境创建边界的测试可单独运行：
+
+```bash
+source scripts/env.sh
+"$RL_PY" -m unittest tests.rl.test_training_config tests.rl.test_physics_backend
+"$ARENA_PY" -m unittest tests.arena.test_backend_launch
+"$ARENA_PY" -m unittest tests.arena.test_newton_mesh_compat
+"$ARENA_PY" -m pytest \
+  "$ARENA_ROOT/isaaclab_arena/tests/test_arena_env_builder_cfg.py" -q
+```
+
+这些检查覆盖默认 PhysX、eval 后端默认跟随 train 与独立覆盖、设备独立配置、旧参数冲突、Newton CPU 拒绝、PhysX 专用缓冲和运行记录。配置解析检查无需启动真实仿真，不能代替物理功能、PPO 更新或跨后端恢复验收。
+
+`tests/arena/test_newton_mesh_compat.py` 使用仓库场景中的小型非封闭静态墙面顶点，真实执行 CPU `newton.ModelBuilder → SolverMuJoCo`，无需大资产、checkpoint 或 Isaac Sim 场景。它检查原始 MuJoCo `LEGACY` 导出会失败、修复后能够编译，以及 Newton 碰撞顶点/索引和显式 body 惯量保持一致。此测试也由 `scripts/test.sh arena` 自动发现；它验证网格兼容修复，不代表 Newton GPU 仿真已经通过完整验收。
+
+真实验收需分别保留：Newton 下站立、移动、关节动作、接触、相机及独立 reset；至少 10 局、2 环境的闭环评测；至少 2 次 PPO 迭代、有限 loss/梯度、权重更新和 checkpoint；同后端及两个方向的 train/eval 组合；双向跨后端恢复后的新更新。记录成功率差异，不以两种后端成功率相等为条件。上述是完整验收范围；Newton PPO 与双向跨后端恢复尚未通过实机验收，本机资源限制见 [RL 说明](rl.md)。产物以训练的 `physics/`、评测的 `protocol.json` / `complete.json` 及对应报告为准。
+
 ## GPU 测试所需产物
 
 RL 入口默认设置 `MALLOC_ARENA_MAX=2`，减少 glibc 在多线程模型与仿真运行后保留的主机内存，为 CPU checkpoint 保存留出空间；可通过同名环境变量覆盖。它不改变模型、训练配置或 Ray 内存保护阈值。
@@ -21,7 +40,7 @@ RL 入口默认设置 `MALLOC_ARENA_MAX=2`，减少 glibc 在多线程模型与�
 | --- | --- |
 | `rl/test_gpu_inference.py` | `models/GR00T-N1.6-G1/checkpoint-20000`、`data/locomanipulation/generated/lerobot` 的 episode 0/49/99 第 100 帧；CUDA。分别运行 reference 与 RL fork，保留 `atol=rtol=1e-5` 的比较报告和源码选择。fork 已知存在 letterbox 预处理差异，原检查允许比较结果为不等价并选择 reference。 |
 | `rl/test_gpu_actor.py` | 同上；自动在 reference 子进程生成真实 observation，再验证 actor、value、ratio 与各组梯度，无需依赖其他测试的执行顺序。 |
-| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter，默认 2 个真实环境、CPU 物理。独立 worker 支持 `--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
+| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter，默认 2 个真实环境、PhysX CPU 物理。独立 worker 支持 `--physics-backend`、`--device`、`--stability-steps`、`--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
 | `rl/test_gpu_checkpoint.py` | 解析后的 RL 配置、完整训练权重及配置引用的基座模型；Isaac Sim、Arena 资产与 CUDA，重载后闭环执行两个动作块。 |
 | `rl/test_gpu_precision.py` | 同一份解析后 RL 配置、完整训练权重及基座模型；足够的主机内存加载模型，逐张量验证 dtype 和数值。 |
 | `rl/test_gpu_export.py` | 同一 RL 配置和完整权重、导出目录（含 `rl_export.json`）、G1 基座模型与上述数据；CUDA、空闲本地端口 5556。导出 manifest 必须对应被检查的权重路径；实测 RLinf 与 server 的单条及批量请求，保留 `atol=rtol=1e-5` 和初始噪声逐位相等判据。 |
@@ -92,6 +111,19 @@ Arena worker 可独立指定环境数和查看器，直接执行以下命令，�
 )
 ```
 
-并行环境与 Viser 的 GPU 回归顺序运行 `--num-envs 2`、`--num-envs 4`、`--num-envs 2 --viser-envs 1` 三组。`--device cuda:0` 可切换为 GPU PhysX；`--legacy-factory` 检查 legacy adapter。独立 worker 与默认 unittest 入口均检查只在第 0 个环境注入成功、跌倒、超时和掉箱信号，其余环境不应误触发。
+并行环境与 Viser 的 GPU 回归顺序运行 `--num-envs 2`、`--num-envs 4`、`--num-envs 2 --viser-envs 1` 三组。`--device cuda:0` 使用 PhysX GPU；`--legacy-factory` 检查 legacy adapter。独立 worker 与默认 unittest 入口均检查只在第 0 个环境注入成功、跌倒、超时和掉箱信号，其余环境不应误触发。
+
+在相同 worker 入口验证 Newton，需同时选择引擎和 CUDA 设备。例如在上面子 shell 的 `cd "$ARENA_ROOT"` 后运行下列命令，并使用新的输出文件：
+
+```bash
+"$RL_PY" -m tests.rl.test_gpu_arena \
+  --physics-backend newton_mjwarp --device cuda:0 \
+  --num-envs 2 --stability-steps 300 \
+  --output "$LAB_ROOT/logs/gpu-tests/arena-newton.json"
+```
+
+`--stability-steps` 先执行指定步数的站立，再检查移动、手臂关节动作、相机、接触力和单环境 reset，报告包含实际后端配置及稳定性指标。成功信号注入仅验证奖励和终止顺序，不计为自然任务成功；完整抓放和成功率仍由真实策略闭环评测验证。更换引擎后分别保留报告，PhysX `both` 模式只是 CPU/GPU 设备对比。
+
+Newton 1.5.2 导出的 MuJoCo 辅助网格默认计算体积惯量，Galileo 背景的开放墙面和细薄桌腿碰撞片会因此无法编译。两个仿真环境的安装脚本均执行 `scripts/setup/fix-newton-mujoco-export.py`：仅在 Newton 提供接触时改用网格表面惯量，保留原始碰撞顶点、三角面及显式刚体质量和惯量；MuJoCo 内置接触路径保持原配置。`tests/arena/test_newton_mesh_compat.py` 通过真实 Newton/MuJoCo CPU 求解器检查静态网格、动态网格和编译后的刚体惯量；同时覆盖平面刚体的 float32 惯量舍入修正及外部接触模式仅跳过初始化 CPU 碰撞生成。升级 Newton 时需重新验证此兼容修复。
 
 更换导出目录时，同时用 `LAB_GPU_EXPORT` 指定新的目录；导出来源权重必须与 `LAB_GPU_RL_WEIGHTS` 一致。完整导出与评测说明见 [eval.md](eval.md)。

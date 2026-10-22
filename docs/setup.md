@@ -13,7 +13,7 @@ for name in data models logs cache; do ln -s "$STORAGE/$name" "$name"; done
 scripts/setup/bootstrap.sh
 ```
 
-bootstrap 以 `GIT_LFS_SKIP_SMUDGE=1` 初始化递归 submodule，检查四个存储入口，然后依次创建 Arena、GR00T 和 RL 环境。缺少存储入口时直接失败，提示对应 `ln -s` 命令。fork 已包含项目修改，不再手工应用 patch；LFS 大文件由各上游运行流程按需获取。
+bootstrap 以 `GIT_LFS_SKIP_SMUDGE=1` 初始化递归 submodule，检查四个存储入口，然后依次创建 Arena、GR00T 和 RL 环境。缺少存储入口时直接失败，提示对应 `ln -s` 命令。fork 已包含项目源码修改，Newton 的兼容修复由安装脚本自动应用；LFS 大文件由各上游运行流程按需获取。
 
 默认 `CUDA_HOME=/usr/local/cuda`；若 toolkit 安装在其他位置，在安装命令前设置 `CUDA_HOME`。uv 缓存使用本机默认位置，不要把 `UV_CACHE_DIR` 指向网络存储。脚本直接调用 venv 的解释器，避免运行阶段 `uv run` 自动同步依赖。
 
@@ -33,6 +33,10 @@ scripts/setup/venv-rl.sh
 
 RL freeze 包含与 GR00T 包元数据不同的 torch、NumPy 等已验证版本，因此安装使用 `--no-deps`。不要在 RL 环境中额外同步 GR00T 的依赖声明。
 
+Arena 与 RL 安装脚本均在依赖安装后自动执行 `scripts/setup/fix-newton-mujoco-export.py`，修复 Newton 1.5.2 的 MuJoCo 导出兼容性：使用 Newton 接触计算时，为非封闭或薄网格选择辅助 `SHELL` 网格惯量；使用 MuJoCo 接触计算时保留 `LEGACY`。修复保留 Newton 碰撞几何和 body 惯量，并仅对 float32 舍入导致的主惯量三角约束误差作最小修正。外部接触模式的初始化 CPU `mj_forward` 临时跳过 MuJoCo 碰撞生成，随后恢复接触约束开关，避免大场景中不必要的碰撞耗尽 CPU 栈。Galileo G1 任务单独将 MJWarp 接触与约束容量均设为至少 1024/env，容纳仓库场景的实际接触数量。无需手工修改 venv。升级 Newton 后需重新验证此修复，脚本会拒绝直接应用于其他版本。
+
+修复通过写入新文件再替换目标文件，避免修改 uv 缓存或其他 venv 共享的硬链接内容。运行协议中的 `newton_solver_sha256` 记录实际安装的 Newton MuJoCo solver 源码摘要，用于区分相同版本号下的源码变化。
+
 ## 核对布局
 
 ```bash
@@ -44,6 +48,6 @@ source scripts/env.sh
 scripts/test.sh all
 ```
 
-`scripts/env.sh` 从自身位置推导 `LAB_ROOT`，导出三套解释器和第三方目录变量。它将 Hugging Face 缓存放到 `cache/huggingface`，临时运行目录放到 `tmp/runtime`，仿真资产缓存和 Recorder 日志链接到 `data/`。其他脚本共用这一布局，无需按主机修改路径。
+`scripts/env.sh` 从自身位置推导 `LAB_ROOT`，导出三套解释器和第三方目录变量。它将 Hugging Face 缓存放到 `cache/huggingface`，通过 `WARP_CACHE_PATH` 和 `NEWTON_CACHE_PATH` 分别将 Warp 与 Newton 缓存放到 `cache/warp`、`cache/newton`，临时运行目录放到 `tmp/runtime`，仿真资产缓存和 Recorder 日志链接到 `data/`。这些运行缓存随项目 `cache` 软链接写入大容量存储；uv 安装缓存仍保留在本地。其他脚本共用这一布局，无需按主机修改路径。
 
 `scripts/test.sh all` 会顺序运行三套环境的普通测试，其中包含 CUDA/FSDP 检查；GPU 模型与仿真验收另见 [测试说明](testing.md)。改动或移动工作目录后应重建 venv，因为 venv 中包含绝对路径。

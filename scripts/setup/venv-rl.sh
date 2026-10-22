@@ -7,4 +7,5 @@ cd "$ARENA_ROOT"
 uv sync --frozen --inexact
 # The validated freeze deliberately includes overrides of upstream requirements.
 uv pip install --python "$RL_PY" --no-deps -r "$LAB_ROOT/scripts/setup/rl-requirements.txt"
+"$RL_PY" "$LAB_ROOT/scripts/setup/fix-newton-mujoco-export.py"
 uv pip install --python "$RL_PY" --no-deps -e "$RLINF_ROOT" -e "$GROOT_REF_ROOT"

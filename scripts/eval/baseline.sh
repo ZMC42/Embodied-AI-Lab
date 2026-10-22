@@ -1,13 +1,42 @@
 #!/usr/bin/env bash
-# Run evaluation backends in sequence and clean up their child processes.
+# Evaluate one physics engine and clean up its child processes.
 set -eo pipefail
 source "$(dirname "$0")/../env.sh"
-run_dir="${1:?Usage: baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed]}"
+physics_backend=isaacsim_physx
+positional=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --physics-backend)
+      [[ $# -ge 2 ]] || { echo '--physics-backend requires a value' >&2; exit 2; }
+      physics_backend="$2"
+      shift 2 ;;
+    --physics-backend=*) physics_backend="${1#*=}"; shift ;;
+    --*) echo "Unknown option: $1" >&2; exit 2 ;;
+    *) positional+=("$1"); shift ;;
+  esac
+done
+set -- "${positional[@]}"
+[[ $# -ge 1 && $# -le 6 ]] || {
+  echo 'Usage: baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed] [--physics-backend NAME]' >&2
+  exit 2
+}
+run_dir="$1"
 backend="${2:-both}"
 episodes="${3:-100}"
 num_envs="${4:-5}"
-model_path="$(realpath "${5:-$LAB_ROOT/models/GR00T-N1.6-G1/checkpoint-20000}")"
 seed="${6:-42}"
+case "$physics_backend" in
+  isaacsim_physx) ;;
+  newton_mjwarp)
+    [[ "$backend" == gpu ]] || { echo 'newton_mjwarp requires gpu (cpu/both are unsupported)' >&2; exit 2; } ;;
+  *) echo 'physics backend must be isaacsim_physx or newton_mjwarp' >&2; exit 2 ;;
+esac
+case "$backend" in
+  both) backends=(cpu gpu) ;;
+  cpu|gpu) backends=("$backend") ;;
+  *) echo 'physics device must be cpu, gpu or both' >&2; exit 2 ;;
+esac
+model_path="$(realpath "${5:-$LAB_ROOT/models/GR00T-N1.6-G1/checkpoint-20000}")"
 server_python="$GROOT_PY"
 server_source="$GROOT_ROOT"
 # RL 导出必须使用训练端的 reference/SDPA，避免不同 attention 栈改变 BF16 动作。
@@ -38,11 +67,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
-case "$backend" in
-  both) backends=(cpu gpu) ;;
-  cpu|gpu) backends=("$backend") ;;
-  *) echo 'backend must be cpu, gpu or both' >&2; exit 2 ;;
-esac
 for physics in "${backends[@]}"; do
   nvidia-smi --query-gpu=timestamp,memory.used,utilization.gpu --format=csv -l 5 \
     > "$run_dir/gpu-$physics.csv" &
@@ -61,6 +85,7 @@ for physics in "${backends[@]}"; do
   [[ "$physics" == gpu ]] && device=cuda
   LD_LIBRARY_PATH="$("$ARENA_PY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$ARENA_PY" -m embodied_ai_lab.eval.baseline \
+    --physics-backend "$physics_backend" \
     --device "$device" --num_envs "$num_envs" --seed "$seed" --enable_cameras \
     --episodes "$episodes" --output "$run_dir/$physics" --model-path "$model_path" \
     --kit_args="--/log/file=$run_dir/kit-$physics.log" \

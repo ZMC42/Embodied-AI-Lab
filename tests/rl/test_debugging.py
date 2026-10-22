@@ -111,7 +111,8 @@ class DebuggingTest(unittest.TestCase):
                     arena_env.ArenaEnv(cfg, 2, offset, 2, None)
                 factory = subprocess.call_args.args[0]
                 self.assertIs(factory.func, arena_env.make_sim)
-                self.assertEqual(factory.keywords, {"debug": expected})
+                self.assertEqual(factory.keywords, {"debug": expected, "worker_index": offset})
+                subprocess.return_value.device.assert_called_once_with()
 
     def test_vscode_attach_ports_match_debug_listeners(self):
         root = Path(__file__).resolve().parents[2]

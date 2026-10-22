@@ -1,12 +1,14 @@
 """Evaluate a G1 checkpoint with Arena's rollout and episode recorder."""
 
-import importlib.metadata
 import json
 import os
 import time
 from pathlib import Path
 
-from isaaclab_arena.cli.isaaclab_arena_cli import get_isaaclab_arena_cli_parser
+from isaaclab_arena.cli.isaaclab_arena_cli import (
+    get_isaaclab_arena_cli_parser,
+    requested_physics_backend_from_argparse,
+)
 from isaaclab_arena.utils.isaaclab_utils.simulation_app import SimulationAppContext
 
 
@@ -38,6 +40,7 @@ def main():
             BaselineDiagnosticsRecorder,
             record_diagnostics,
         )
+        from isaaclab_arena.utils.physics_backend import physics_protocol
 
         parser = get_isaaclab_arena_environments_cli_parser(parser)
         args = parser.parse_args()
@@ -64,11 +67,12 @@ def main():
         assert policy.action_chunk_length == 50
         rl_inference = os.environ["EVAL_RL_SERVER"] == "1"
         protocol = {
+            **physics_protocol(base),
+            "requested_physics_backend": requested_physics_backend_from_argparse(args),
             "seed": args.seed,
             "episodes": args.episodes,
             "num_envs": args.num_envs,
             "device": str(base.device),
-            "physics": type(base.cfg.sim.physics).__name__,
             "camera": type(base.scene["robot_head_cam"]).__name__,
             "step_dt": base.step_dt,
             "max_episode_steps": base.max_episode_length,
@@ -78,10 +82,6 @@ def main():
             "inference_micro_batch_size": 1 if rl_inference else args.num_envs,
             "navigation_threshold_m": 0.5,
             "fall_diagnostic_drop_m": 0.4,
-            "packages": {
-                name: importlib.metadata.version(name)
-                for name in ("torch", "isaacsim", "isaaclab", "isaaclab_arena")
-            },
         }
         (args.output / "protocol.json").write_text(json.dumps(protocol, indent=2) + "\n")
         start = time.monotonic()
