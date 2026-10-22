@@ -58,13 +58,13 @@ class PhysicsBackendTest(unittest.TestCase):
                      patch("embodied_ai_lab.rlinf.env.gym.spec", return_value=spec), \
                      patch("embodied_ai_lab.rlinf.env.gym.make", return_value=SimpleNamespace(unwrapped=environment)), \
                      patch("embodied_ai_lab.rlinf.chunk_env.ChunkEnv", return_value="chunk-env"), \
-                     patch("isaaclab_arena.utils.physics_backend.physics_protocol", return_value={
+                     patch("embodied_ai_lab.physics.physics_protocol", return_value={
                          "physics": type(physics).__name__, "physics_backend": backend,
                      }) as protocol:
                     self.assertEqual(make_sim(cfg, 2, 42, worker_index=3), ("chunk-env", "sim-app"))
                 self.assertIs(sys.argv, original_arguments)
-                self.assertEqual(registration_arguments.count("--physics-backend"), 1)
-                self.assertEqual(registration_arguments[-1], backend)
+                self.assertEqual(registration_arguments.count("--presets"), 1)
+                self.assertEqual(registration_arguments[-1], "physx" if backend == "isaacsim_physx" else "newton")
                 self.assertEqual(env_cfg.sim.device, "cuda:0")
                 self.assertEqual(env_cfg.scene.num_envs, 2)
                 if backend == "isaacsim_physx":
@@ -82,6 +82,33 @@ class PhysicsBackendTest(unittest.TestCase):
                 self.assertEqual(record["physics"], type(physics).__name__)
                 self.assertEqual(record["requested_physics_backend"], backend)
                 self.assertEqual(record["seed"], 42)
+
+    def test_project_protocol_keeps_actual_configuration_and_installed_patch_hash(self):
+        import hashlib
+        from importlib.metadata import distribution
+
+        from isaaclab.physics import PhysicsCfg
+        from isaaclab_arena.utils.physics_backend import physics_protocol as arena_protocol
+        from embodied_ai_lab.physics import physics_protocol
+
+        physics = PhysicsCfg(class_type=object)
+        env = SimpleNamespace(
+            cfg=SimpleNamespace(sim=SimpleNamespace(physics=physics, dt=0.005), decimation=4),
+            sim=SimpleNamespace(physics_manager=object, device="cuda:0"),
+            scene=SimpleNamespace(sensors={}), step_dt=0.02,
+        )
+        actual = physics_protocol(env)
+        installed_solver = distribution("newton").locate_file("newton/_src/solvers/mujoco/solver_mujoco.py")
+        self.assertEqual(actual.pop("newton_solver_sha256"), hashlib.sha256(installed_solver.read_bytes()).hexdigest())
+        self.assertEqual(actual, arena_protocol(env))
+        json.dumps(actual)
+
+    def test_freeform_selector_fails_before_starting_application(self):
+        cfg = OmegaConf.create(dict(
+            physics_backend="isaacsim_physx", device="cuda:0", arena_args=["--presets", "newton"],
+        ))
+        with self.assertRaisesRegex(ValueError, "physics_backend"):
+            make_sim(cfg, 2, 42)
 
     def test_bad_device_fails_before_starting_application(self):
         cfg = OmegaConf.create(dict(

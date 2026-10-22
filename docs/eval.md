@@ -18,22 +18,24 @@ HF_HOME="$PWD/cache/huggingface" uvx --from huggingface_hub hf download \
 
 ## 物理后端与 CPU/GPU 基线
 
-`scripts/eval/baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed] [--physics-backend NAME]` 是完整评测入口。物理引擎默认为 `isaacsim_physx`，设备模式默认 `both`，即顺序运行 PhysX CPU 和 GPU；每种设备 100 个 episode、5 个并行环境、G1 checkpoint、seed 42。输出目录中对应的 `cpu/`、`gpu/` 子目录必须不存在。
+`scripts/eval/baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed] [--presets physx|newton]` 是完整评测入口。默认使用 `physx`，设备模式默认 `both`，即顺序运行 PhysX CPU 和 GPU；每种设备 100 个 episode、5 个并行环境、G1 checkpoint、seed 42。输出目录中对应的 `cpu/`、`gpu/` 子目录必须不存在。
 
-`--physics-backend` 可出现在任意位置，后续可选位置参数可以省略。引擎选项支持 `isaacsim_physx` 和 `newton_mjwarp`；Newton 只支持 `gpu`，与 `cpu` 或 `both` 组合会在启动服务器和仿真前报错。每次命令选择一个物理引擎，跨引擎比较时分别运行并使用不同输出目录。
+`--presets` 可出现在任意位置，后续可选位置参数可以省略；`physx` 和 `newton` 分别选择 PhysX 和 Newton MJWarp。Newton 只支持 `gpu`，与 `cpu` 或 `both` 组合会在启动服务器和仿真前报错。每次命令选择一个物理引擎，跨引擎比较时分别运行并使用不同输出目录。
+
+后端选择沿用 [Arena 官方物理配置](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/physics_configuration.html)与[选择优先级](https://isaac-sim.github.io/IsaacLab-Arena/main/pages/concepts/environment/physics_backend_selection.html)：显式 `--presets` 优先于环境的 `default_physics_backend`。本文 baseline 默认传入 `physx`；底层 Arena 未指定 preset 时才使用环境默认值。
 
 ```bash
 RUN_DIR="$PWD/logs/baseline/$(date +%Y%m%d-%H%M%S)"
 scripts/eval/baseline.sh "$RUN_DIR" both 100 5
 
-# Newton GPU，显式指定完整协议。
+# Newton GPU。
 NEWTON_DIR="$PWD/logs/baseline-newton/$(date +%Y%m%d-%H%M%S)"
 scripts/eval/baseline.sh "$NEWTON_DIR" gpu 100 5 \
   "$PWD/models/GR00T-N1.6-G1/checkpoint-20000" 42 \
-  --physics-backend newton_mjwarp
+  --presets newton
 ```
 
-例如 `scripts/eval/baseline.sh "$NEWTON_DIR" gpu --physics-backend newton_mjwarp` 使用其余默认值。脚本启动推理服务器、仿真和 GPU 监控，并在每种设备运行结束时清理子进程。`both` 顺序运行 PhysX CPU/GPU，分别重启服务器并设置推理随机种子。CPU/GPU 指物理设备，模型推理与相机仍需 GPU。在启动命令的终端按 Ctrl+C 停止运行。
+例如 `scripts/eval/baseline.sh "$NEWTON_DIR" gpu --presets newton` 使用其余默认值。脚本启动推理服务器、仿真和 GPU 监控，并在每种设备运行结束时清理子进程。`both` 顺序运行 PhysX CPU/GPU，分别重启服务器并设置推理随机种子。CPU/GPU 指物理设备，模型推理与相机仍需 GPU。在启动命令的终端按 Ctrl+C 停止运行。
 
 协议固定为 50 Hz、每个 episode 最多 1500 控制步、动作块 50 步，任务为 `galileo_g1_locomanip_pick_and_place`、物体 `brown_box`、机器人 `g1_wbc_joint`。`protocol.json` 记录请求与实际完整后端名、物理设备、配置类、manager、实际求解器参数、步长、相机、包版本，以及 checkpoint、seed、环境数和推理栈；原有 `physics` 字段继续记录配置类。`newton_solver_sha256` 区分同一 Newton 版本号下的 solver 源码变化，包括安装时自动应用的MuJoCo 导出与初始化兼容修复，见 [环境准备](setup.md)。固定 seed 不能保证仿真逐位复现。
 
@@ -98,12 +100,12 @@ scripts/eval/groot-server.sh
 scripts/eval/arena.sh --record_camera_video
 
 # 同一服务器，改用 Newton GPU 闭环执行。
-scripts/eval/arena.sh --physics-backend newton_mjwarp --device cuda:0
+scripts/eval/arena.sh --presets newton --device cuda:0
 ```
 
 客户端产物位于 `logs/evaluation/`，每次运行的输出目录含 `protocol_rank0.json`，由实际仿真配置生成后端与设备记录；多 rank 时各 rank 分别记录。两侧日志分别追加到 `logs/groot-server.log` 和 `logs/arena-eval.log`，Kit 日志为 `logs/kit.log`。两个客户端命令顺序执行；完成后在终端 1 按 Ctrl+C 停止服务器并释放模型。其余客户端参数原样传给上游 policy runner。
 
-Arena 兼容旧的 `--presets physx|newton`；它与 `--physics-backend` 同时出现时必须指向同一引擎，否则报错。两种选择器均将请求后端记录为完整名称；均未指定时请求值为 `null`，实际后端仍由环境配置生成。Newton 必须显式选择 CUDA 物理设备，脚本原有默认 CPU 不会自动变更。模型服务器无需物理配置；后端选择发生在仿真客户端创建环境时。浏览器查看器、Kit 串流和双端断点见 [debugging.md](debugging.md)。单局用于观察行为，不用于估计成功率。
+Arena 统一使用已有的 `--presets physx|newton`；请求后端在协议中记为完整名称 `isaacsim_physx` 或 `newton_mjwarp`。未指定 preset 时请求值为 `null`，实际后端由环境配置生成。Newton 必须显式选择 CUDA 物理设备，脚本原有默认 CPU 不会自动变更。模型服务器无需物理配置；后端选择发生在仿真客户端创建环境时。浏览器查看器、Kit 串流和双端断点见 [debugging.md](debugging.md)。单局用于观察行为，不用于估计成功率。
 
 ## 导出 RL 权重
 

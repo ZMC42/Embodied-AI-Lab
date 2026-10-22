@@ -10,6 +10,7 @@ from isaaclab_arena.cli.isaaclab_arena_cli import (
     requested_physics_backend_from_argparse,
 )
 from isaaclab_arena.utils.isaaclab_utils.simulation_app import SimulationAppContext
+from isaaclab_arena.utils.physics_backend import validate_physics_device
 
 
 def main():
@@ -19,6 +20,7 @@ def main():
     parser.add_argument("--port", type=int, default=5555)
     parser.add_argument("--model-path", type=Path, default=Path(__file__).resolve().parents[2] / "models/GR00T-N1.6-G1/checkpoint-20000")
     args, _ = parser.parse_known_args()
+    validate_physics_device(args.presets, args.device)
     args.output.mkdir(parents=True, exist_ok=False)
 
     with SimulationAppContext(args):
@@ -40,7 +42,7 @@ def main():
             BaselineDiagnosticsRecorder,
             record_diagnostics,
         )
-        from isaaclab_arena.utils.physics_backend import physics_protocol
+        from embodied_ai_lab.physics import physics_protocol
 
         parser = get_isaaclab_arena_environments_cli_parser(parser)
         args = parser.parse_args()

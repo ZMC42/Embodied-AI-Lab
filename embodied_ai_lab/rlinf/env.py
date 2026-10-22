@@ -50,8 +50,6 @@ def make_sim(cfg, num_envs, seed, debug=False, worker_index=0):
         "--seed",
         str(seed),
         *arguments,
-        "--physics-backend",
-        backend,
     ]
     try:
         environment_registration_callback()
@@ -71,7 +69,7 @@ def make_sim(cfg, num_envs, seed, debug=False, worker_index=0):
         env_cfg.sim.physics.gpu_total_aggregate_pairs_capacity = 2**16
     env = gym.make(cfg.task, cfg=env_cfg).unwrapped
     if getattr(cfg, "physics_log_dir", None):
-        from isaaclab_arena.utils.physics_backend import physics_protocol
+        from embodied_ai_lab.physics import physics_protocol
 
         role = "eval" if cfg.is_eval else "train"
         directory = Path(cfg.physics_log_dir)

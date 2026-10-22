@@ -2,22 +2,22 @@
 # Evaluate one physics engine and clean up its child processes.
 set -eo pipefail
 source "$(dirname "$0")/../env.sh"
-physics_backend=isaacsim_physx
+preset=physx
 positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --physics-backend)
-      [[ $# -ge 2 ]] || { echo '--physics-backend requires a value' >&2; exit 2; }
-      physics_backend="$2"
+    --presets)
+      [[ $# -ge 2 ]] || { echo '--presets requires a value' >&2; exit 2; }
+      preset="$2"
       shift 2 ;;
-    --physics-backend=*) physics_backend="${1#*=}"; shift ;;
+    --presets=*) preset="${1#*=}"; shift ;;
     --*) echo "Unknown option: $1" >&2; exit 2 ;;
     *) positional+=("$1"); shift ;;
   esac
 done
 set -- "${positional[@]}"
 [[ $# -ge 1 && $# -le 6 ]] || {
-  echo 'Usage: baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed] [--physics-backend NAME]' >&2
+  echo 'Usage: baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed] [--presets NAME]' >&2
   exit 2
 }
 run_dir="$1"
@@ -25,11 +25,11 @@ backend="${2:-both}"
 episodes="${3:-100}"
 num_envs="${4:-5}"
 seed="${6:-42}"
-case "$physics_backend" in
-  isaacsim_physx) ;;
-  newton_mjwarp)
-    [[ "$backend" == gpu ]] || { echo 'newton_mjwarp requires gpu (cpu/both are unsupported)' >&2; exit 2; } ;;
-  *) echo 'physics backend must be isaacsim_physx or newton_mjwarp' >&2; exit 2 ;;
+case "$preset" in
+  physx) ;;
+  newton)
+    [[ "$backend" == gpu ]] || { echo 'newton requires gpu (cpu/both are unsupported)' >&2; exit 2; } ;;
+  *) echo 'physics preset must be physx or newton' >&2; exit 2 ;;
 esac
 case "$backend" in
   both) backends=(cpu gpu) ;;
@@ -85,7 +85,7 @@ for physics in "${backends[@]}"; do
   [[ "$physics" == gpu ]] && device=cuda
   LD_LIBRARY_PATH="$("$ARENA_PY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/nvidia/cuda_runtime/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$ARENA_PY" -m embodied_ai_lab.eval.baseline \
-    --physics-backend "$physics_backend" \
+    --presets "$preset" \
     --device "$device" --num_envs "$num_envs" --seed "$seed" --enable_cameras \
     --episodes "$episodes" --output "$run_dir/$physics" --model-path "$model_path" \
     --kit_args="--/log/file=$run_dir/kit-$physics.log" \

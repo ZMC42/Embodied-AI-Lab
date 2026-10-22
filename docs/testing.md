@@ -13,7 +13,7 @@ GPU 测试的前置产物和运行示例见下文。
 
 ## 物理后端配置回归
 
-公开名称为 `isaacsim_physx` 与 `newton_mjwarp`；物理引擎与 `cpu` / `cuda:0` 执行设备分别配置。PhysX 支持 CPU/GPU，Newton 仅支持 CUDA。训练配置、旧 Arena 选择器消解和环境创建边界的测试可单独运行：
+RL 配置使用完整名称 `isaacsim_physx` 与 `newton_mjwarp`，Arena CLI 使用已有的 `--presets physx|newton`；物理引擎与 `cpu` / `cuda:0` 执行设备分别配置。PhysX 支持 CPU/GPU，Newton 仅支持 CUDA。训练配置、Arena preset 和环境创建边界的测试可单独运行：
 
 ```bash
 source scripts/env.sh
@@ -24,7 +24,7 @@ source scripts/env.sh
   "$ARENA_ROOT/isaaclab_arena/tests/test_arena_env_builder_cfg.py" -q
 ```
 
-这些检查覆盖默认 PhysX、eval 后端默认跟随 train 与独立覆盖、设备独立配置、旧参数冲突、Newton CPU 拒绝、PhysX 专用缓冲和运行记录。配置解析检查无需启动真实仿真，不能代替物理功能、PPO 更新或跨后端恢复验收。
+这些检查覆盖默认 PhysX、eval 后端默认跟随 train 与独立覆盖、设备独立配置、拒绝 `arena_args` 中的后端选择器、Newton CPU 拒绝、PhysX 专用缓冲和运行记录。恢复来源只读取 `physics/run.json`，缺失时记录 `unknown`。配置解析检查无需启动真实仿真，不能代替物理功能、PPO 更新或跨后端恢复验收。
 
 `tests/arena/test_newton_mesh_compat.py` 使用仓库场景中的小型非封闭静态墙面顶点，真实执行 CPU `newton.ModelBuilder → SolverMuJoCo`，无需大资产、checkpoint 或 Isaac Sim 场景。它检查原始 MuJoCo `LEGACY` 导出会失败、修复后能够编译，以及 Newton 碰撞顶点/索引和显式 body 惯量保持一致。此测试也由 `scripts/test.sh arena` 自动发现；它验证网格兼容修复，不代表 Newton GPU 仿真已经通过完整验收。
 
@@ -40,7 +40,7 @@ RL 入口默认设置 `MALLOC_ARENA_MAX=2`，减少 glibc 在多线程模型与�
 | --- | --- |
 | `rl/test_gpu_inference.py` | `models/GR00T-N1.6-G1/checkpoint-20000`、`data/locomanipulation/generated/lerobot` 的 episode 0/49/99 第 100 帧；CUDA。分别运行 reference 与 RL fork，保留 `atol=rtol=1e-5` 的比较报告和源码选择。fork 已知存在 letterbox 预处理差异，原检查允许比较结果为不等价并选择 reference。 |
 | `rl/test_gpu_actor.py` | 同上；自动在 reference 子进程生成真实 observation，再验证 actor、value、ratio 与各组梯度，无需依赖其他测试的执行顺序。 |
-| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter，默认 2 个真实环境、PhysX CPU 物理。独立 worker 支持 `--physics-backend`、`--device`、`--stability-steps`、`--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
+| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter，默认 2 个真实环境、PhysX CPU 物理。独立 worker 支持 `--presets physx|newton`、`--device`、`--stability-steps`、`--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
 | `rl/test_gpu_checkpoint.py` | 解析后的 RL 配置、完整训练权重及配置引用的基座模型；Isaac Sim、Arena 资产与 CUDA，重载后闭环执行两个动作块。 |
 | `rl/test_gpu_precision.py` | 同一份解析后 RL 配置、完整训练权重及基座模型；足够的主机内存加载模型，逐张量验证 dtype 和数值。 |
 | `rl/test_gpu_export.py` | 同一 RL 配置和完整权重、导出目录（含 `rl_export.json`）、G1 基座模型与上述数据；CUDA、空闲本地端口 5556。导出 manifest 必须对应被检查的权重路径；实测 RLinf 与 server 的单条及批量请求，保留 `atol=rtol=1e-5` 和初始噪声逐位相等判据。 |
@@ -117,7 +117,7 @@ Arena worker 可独立指定环境数和查看器，直接执行以下命令，�
 
 ```bash
 "$RL_PY" -m tests.rl.test_gpu_arena \
-  --physics-backend newton_mjwarp --device cuda:0 \
+  --presets newton --device cuda:0 \
   --num-envs 2 --stability-steps 300 \
   --output "$LAB_ROOT/logs/gpu-tests/arena-newton.json"
 ```

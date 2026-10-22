@@ -15,12 +15,12 @@ class BackendLaunchTest(unittest.TestCase):
             output = Path(directory) / "evaluation"
             result = subprocess.run(
                 [str(ROOT / "scripts/eval/baseline.sh"), str(output),
-                 "--physics-backend", "newton_mjwarp", "cpu", "10", "2",
+                 "--presets", "newton", "cpu", "10", "2",
                  str(Path(directory) / "missing-model" / "checkpoint"), "42"],
                 capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 2)
-            self.assertIn("newton_mjwarp requires gpu", result.stderr)
+            self.assertIn("newton requires gpu", result.stderr)
             self.assertFalse(output.exists())
 
 

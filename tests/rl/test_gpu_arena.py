@@ -15,14 +15,16 @@ from urllib.request import urlopen
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--physics-backend", choices=("isaacsim_physx", "newton_mjwarp"),
-                        default="isaacsim_physx")
+    parser.add_argument("--presets", choices=("physx", "newton"), default="physx")
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--viser-envs", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--legacy-factory", action="store_true")
     parser.add_argument("--stability-steps", type=int, default=0)
     args = parser.parse_args()
+    from isaaclab_arena.utils.physics_backend import PhysicsBackend, canonical_physics_backend
+
+    backend = canonical_physics_backend(PhysicsBackend(args.presets))
     import torch
     from omegaconf import OmegaConf
 
@@ -31,7 +33,7 @@ def main():
     cfg = OmegaConf.create(
         dict(
             device=args.device,
-            physics_backend=args.physics_backend,
+            physics_backend=backend,
             viser_envs=args.viser_envs,
             task="galileo_g1_locomanip_pick_and_place_rl",
             io_module="embodied_ai_lab.environments.g1_io",
@@ -50,10 +52,10 @@ def main():
         cfg.arena_args[-1] = "tests.rl.legacy_factory:LegacyLocomanipEnvironment"
     env, app = make_sim(cfg, args.num_envs, 1000)
     base = env.env
-    from isaaclab_arena.utils.physics_backend import physics_protocol
+    from embodied_ai_lab.physics import physics_protocol
 
     actual_physics = physics_protocol(base)
-    assert actual_physics["physics_backend"] == args.physics_backend, actual_physics
+    assert actual_physics["physics_backend"] == backend, actual_physics
     env_zero_only = [True] + [False] * (args.num_envs - 1)
     try:
         assert str(base.device) == args.device
@@ -172,7 +174,7 @@ def main():
         assert not trunc3.any() and not reward3.any()
         report = dict(
             device=args.device,
-            physics_backend=args.physics_backend,
+            physics_backend=backend,
             physics_config=type(base.cfg.sim.physics).__name__,
             actual_physics=actual_physics,
             stability=stability,
@@ -216,7 +218,7 @@ class ArenaGpuTest(unittest.TestCase):
         from tests.gpu import REPORTS, run_worker
 
         report = REPORTS / "arena-newton-g1.json"
-        run_worker(self, __name__, "--device", "cuda:0", "--physics-backend", "newton_mjwarp",
+        run_worker(self, __name__, "--device", "cuda:0", "--presets", "newton",
                    "--stability-steps", 300, "--output", report, report=report)
 
 

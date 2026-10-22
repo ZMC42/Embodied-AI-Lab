@@ -53,11 +53,13 @@ scripts/train/rl.sh ppo-offload env.train.device=cpu \
   env.eval.physics_backend=newton_mjwarp env.eval.device=cuda:0
 ```
 
-配置保存在 `configs/rl/locomanip/ppo.yaml`，环境入口为 `embodied_ai_lab/rlinf/env.py`。后端在创建仿真子进程前确定；修改配置后通过新环境进程切换。`arena_args` 中与结构化字段相同的旧 `--presets` / `--physics-backend` 会被移除，冲突则报错；项目命令统一使用上述结构化字段。
+配置保存在 `configs/rl/locomanip/ppo.yaml`，环境入口为 `embodied_ai_lab/rlinf/env.py`。后端在创建仿真子进程前确定，并在项目边界映射为 Arena 已有的 `physx` / `newton` preset；修改配置后通过新环境进程切换。RL 的 `arena_args` 不允许携带 `--presets` 或 `--physics-backend`，后端统一由上述结构化字段决定；独立 Arena 评测使用 `--presets`。
+
+Isaac Lab 官方的 [`physics=NAME` 选择器](https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/environments.html)可选择任务声明的完整 `PresetCfg`。本项目使用 RLinf 入口与 Arena builder，当前通过 Arena preset 接入后端；直接向项目命令追加官方 `physics=` 参数尚未接入该解析流程。
 
 入口先等待 train/eval 仿真全部初始化，再依次加载 rollout 和 actor 模型，避免 Newton 场景构建的主存峰值与模型加载重叠；恢复 checkpoint 的加载仍在全部 worker 就绪后执行。
 
-训练在 `${runner.logger.log_path}/${runner.logger.experiment_name}/physics/` 写入记录：`run.json` 包含来源 checkpoint、来源及当前 train/eval 后端；`config.yaml` 保存解析后的配置；`train-worker_*-pid_*.json` 和 `eval-worker_*-pid_*.json` 由仿真进程记录实际后端、物理设备、配置和 manager、求解器参数、步长、相机与包版本。`newton_solver_sha256` 用于区分同版本 Newton solver 的源码变化。对应下方短跑示例的路径为 `$RUN_DIR/train/physics/`。
+训练在 `${runner.logger.log_path}/${runner.logger.experiment_name}/physics/` 写入记录：`run.json` 包含来源 checkpoint、来源及当前 train/eval 后端；`train-worker_*-pid_*.json` 和 `eval-worker_*-pid_*.json` 由仿真进程记录实际后端、物理设备、配置和 manager、求解器参数、步长、相机与包版本。`newton_solver_sha256` 用于区分同版本 Newton solver 的源码变化。解析后的训练配置沿用 TensorBoard 配置产物。对应下方短跑示例的物理记录路径为 `$RUN_DIR/train/physics/`。
 
 Newton 的真实训练和跨后端恢复尚未通过整套运行验收。RTX 4090 24 GiB 上，PhysX train/eval 同时使用 GPU 物理的短跑曾在第二轮 rollout 出现 GPU page fault / device lost，采样峰值 23979 MiB；现有证据不能确定是容量还是生命周期问题。可独立设置 PhysX 角色的 `device=cpu`，相机与模型仍使用 GPU。下面已有的容量实测来自未启用内置 eval 的 PhysX 运行，不能外推到两个仿真进程同时驻留。
 
@@ -136,7 +138,7 @@ set -o pipefail
 
 在上述训练参数末尾、日志管道之前追加 `"runner.resume_dir=$PREVIOUS_RUN/train/checkpoints/global_step_2"` 恢复；`PREVIOUS_RUN` 指向旧的运行目录，新运行使用不同的 `RUN_DIR`。resume_dir 指到 `global_step_N`，保持模型、训练范围、环境数和 batch 一致，将 max_epochs、max_steps 设置为恢复后的目标总步数。恢复模型、优化器和 scheduler，不保证仿真轨迹逐位续接。
 
-恢复时由本次配置决定后端，允许 PhysX 与 Newton 双向切换，保留优化器和训练步数；仿真及 WBC 状态重新初始化。例如在恢复参数后追加 `env.train.physics_backend=newton_mjwarp`，内置 eval 默认随之切换，也可单独覆盖。`physics/run.json` 记录来源与当前后端，旧 checkpoint 缺少来源信息时记为 `unknown`，仍允许恢复。导出后的模型也可在独立推理和评测中选择本次后端。
+恢复时由本次配置决定后端，允许 PhysX 与 Newton 双向切换，保留优化器和训练步数；仿真及 WBC 状态重新初始化。例如在恢复参数后追加 `env.train.physics_backend=newton_mjwarp`，内置 eval 默认随之切换，也可单独覆盖。`physics/run.json` 记录来源与当前后端；来源运行没有 `physics/run.json` 时记为 `unknown`，仍允许恢复。双向跨后端恢复尚未通过实机验收。导出后的模型也可在独立推理和评测中选择本次后端。
 
 offload 配方启用 `algorithm.log_epoch_metrics`，记录 `actor/epoch_1..N/{clip_fraction,approx_kl,ratio,valid_count}` 和剔除 epoch1 的 `actor/epoch_ge_2/*`。按 PPO 实际广播后的有效 loss_mask 元素数加权，跨 rank 求和再相除；全零 mask 的整组均值为 NaN。`approx_kl` 使用有符号的 `-mean(log_ratio)`，`clip_fraction` 沿用上游考虑 advantage 的裁剪判定。原有跨 epoch 聚合指标保持原口径。
 

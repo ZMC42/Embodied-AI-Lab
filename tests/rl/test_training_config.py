@@ -75,28 +75,31 @@ class TrainingConfigTest(unittest.TestCase):
                 self.assertEqual(cfg.env.train.device, "cuda:0")
                 self.assertEqual(cfg.env.eval.device, "cuda:0")
 
-    def test_legacy_backend_selectors_removed_or_rejected(self):
+    def test_arena_arguments_use_one_preset_from_project_config(self):
         cfg = self.compose().env.train
-        cfg.arena_args = ["--object", "brown_box", "--presets=physx",
-                          "--physics-backend", "isaacsim_physx", "--presets", "physx"]
-        self.assertEqual(arena_arguments(cfg), ["--object", "brown_box"])
-        for arguments in (["--presets", "newton"],
-                          ["--physics-backend=newton_mjwarp"], ["--presets"]):
+        self.assertEqual(arena_arguments(cfg), [*cfg.arena_args, "--presets", "physx"])
+        for arguments in (["--presets", "physx"], ["--presets=newton"],
+                          ["--physics-backend", "isaacsim_physx"], ["--presets"]):
             cfg.arena_args = arguments
-            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+            with self.subTest(arguments=arguments), self.assertRaisesRegex(ValueError, "physics_backend"):
                 arena_arguments(cfg)
+        cfg.arena_args = []
+        cfg.physics_backend = "unknown"
+        with self.assertRaisesRegex(ValueError, "Unknown physics backend"):
+            arena_arguments(cfg)
 
-    def test_eval_override_does_not_inherit_train_backend_selector(self):
+    def test_eval_override_preserves_inherited_arguments(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = self.compose(["env.eval.physics_backend=newton_mjwarp"])
             cfg.env.train.physics_log_dir = directory
-            cfg.env.train.arena_args.extend(["--presets", "physx"])
+            original = list(cfg.env.train.arena_args)
             prepare_training_config(cfg)
-            self.assertNotIn("--presets", cfg.env.train.arena_args)
-            self.assertNotIn("--presets", cfg.env.eval.arena_args)
-            self.assertEqual(cfg.env.eval.physics_backend, "newton_mjwarp")
+            self.assertEqual(list(cfg.env.train.arena_args), original)
+            self.assertEqual(list(cfg.env.eval.arena_args), original)
+            self.assertEqual(arena_arguments(cfg.env.train)[-2:], ["--presets", "physx"])
+            self.assertEqual(arena_arguments(cfg.env.eval)[-2:], ["--presets", "newton"])
             cfg.env.eval.arena_args = ["--presets", "physx"]
-            with self.assertRaisesRegex(ValueError, "conflicts"):
+            with self.assertRaisesRegex(ValueError, "physics_backend"):
                 prepare_training_config(cfg)
 
     def test_newton_cpu_rejected_before_creating_run_records(self):
@@ -127,45 +130,22 @@ class TrainingConfigTest(unittest.TestCase):
                 self.assertEqual(cfg.runner.resume_dir, checkpoint)
                 self.assertEqual(record["source_checkpoint"], checkpoint)
 
-    def test_resume_uses_original_config_and_allows_unknown_source(self):
+    def test_old_checkpoint_is_unknown_even_with_legacy_config_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             original = Path(directory) / "old"
-            (original / "physics").mkdir(parents=True)
-            checkpoint = str(original / "checkpoints/global_step_2")
+            checkpoint = original / "checkpoints/global_step_2"
+            for relative in ("old/physics/config.yaml", "tensorboard/config.yaml", "tensorboard/all/config.yaml"):
+                path = Path(directory) / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                OmegaConf.save(self.compose(), path, resolve=True)
+            self.assertEqual(_source_backends(checkpoint), {"train": "unknown", "eval": "unknown"})
             cfg = self.compose(["env.train.physics_backend=newton_mjwarp"])
-            cfg.runner.resume_dir = checkpoint
+            cfg.runner.resume_dir = str(checkpoint)
             cfg.env.train.physics_log_dir = str(Path(directory) / "new/physics")
-            for known in (False, True):
-                if known:
-                    OmegaConf.save(self.compose(), original / "physics/config.yaml", resolve=True)
-                prepare_training_config(cfg)
-                record = json.loads((Path(cfg.env.train.physics_log_dir) / "run.json").read_text())
-                expected = "isaacsim_physx" if known else "unknown"
-                self.assertEqual(record["source_backends"], {"train": expected, "eval": expected})
-
-    def test_shared_tensorboard_config_requires_matching_source_run(self):
-        for tensorboard in ("tensorboard", "tensorboard/all"):
-            with self.subTest(tensorboard=tensorboard), tempfile.TemporaryDirectory() as directory:
-                log_path = Path(directory)
-                checkpoint = log_path / "source/checkpoints/global_step_2"
-                config_path = log_path / tensorboard / "config.yaml"
-                config_path.parent.mkdir(parents=True)
-                for logger, expected in (
-                    ({"log_path": directory, "experiment_name": "source"}, "newton_mjwarp"),
-                    ({"log_path": directory, "experiment_name": "later-run"}, "unknown"),
-                    ({"log_path": str(log_path / "other"), "experiment_name": "source"}, "unknown"),
-                    ({}, "unknown"),
-                ):
-                    with self.subTest(logger=logger):
-                        saved = OmegaConf.create({
-                            "runner": {"logger": logger},
-                            "env": {
-                                "train": {"physics_backend": "newton_mjwarp"},
-                                "eval": {"physics_backend": "newton_mjwarp"},
-                            },
-                        })
-                        OmegaConf.save(saved, config_path)
-                        self.assertEqual(_source_backends(checkpoint), {"train": expected, "eval": expected})
+            prepare_training_config(cfg)
+            record = json.loads((Path(cfg.env.train.physics_log_dir) / "run.json").read_text())
+            self.assertEqual(record["source_backends"], {"train": "unknown", "eval": "unknown"})
+            self.assertFalse((Path(cfg.env.train.physics_log_dir) / "config.yaml").exists())
 
     def test_offload_batch_tracks_parallel_environment_count(self):
         searchpath = ROOT / "third_party/RLinf/examples/embodiment/config"
