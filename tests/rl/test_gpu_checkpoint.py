@@ -54,7 +54,6 @@ def main():
     model.to(device="cuda")
     torch.manual_seed(2000)
     cfg.env.eval.device = args.device
-    cfg.env.eval.viser_envs = 0
     env, app = make_sim(cfg.env.eval, 2, 2000)
     try:
         obs, _ = env.reset(seed=2000)
@@ -82,7 +81,10 @@ def main():
             strict_load=True,
             checked_value_key=key,
             device=args.device,
-            seed=2000,
+            seed=env.env.cfg.seed,
+            num_envs=env.num_envs,
+            viser_envs=cfg.env.eval.viser_envs,
+            arena=OmegaConf.to_container(cfg.env.eval.arena, resolve=True),
             chunks=2,
             control_steps_per_env=100,
             total_control_steps=200,

@@ -62,22 +62,21 @@ env:
     total_num_envs: 2
     viser_envs: 0
     group_size: 1
+    # Arena 30 s × 50 Hz；修改上限须同步映射到 Arena 任务配置。
     max_episode_steps: 1500
     max_steps_per_rollout_epoch: 1500
+    # ArenaEnv 仅支持 auto_reset=true、ignore_terminations=false。
     auto_reset: true
     env_type: isaaclab
     seed: 1000
     device: cuda:0
-    task: galileo_g1_locomanip_pick_and_place_rl
     ignore_terminations: false
     io_module: embodied_ai_lab.environments.g1_io
-    arena_args:
-    - --object
-    - brown_box
-    - --embodiment
-    - g1_wbc_joint
-    - --external_environment_class_path
-    - embodied_ai_lab.environments.locomanip:LocomanipRLEnvironment
+    arena:
+      object: brown_box
+      destination: blue_sorting_bin
+      embodiment: g1_wbc_joint
+      enable_cameras: true
     init_params:
       id: Arena-v0
     video_cfg:
@@ -85,12 +84,15 @@ env:
     use_fixed_reset_state_ids: false
     is_eval: false
   eval:
+    viser_envs: 0
     rollout_epoch: 1
     use_rel_reward: false
     total_num_envs: 2
     group_size: 1
+    # ArenaEnv 仅支持 auto_reset=true、ignore_terminations=false。
     auto_reset: true
     ignore_terminations: false
+    # Arena 30 s × 50 Hz；修改上限须同步映射到 Arena 任务配置。
     max_episode_steps: 1500
     max_steps_per_rollout_epoch: 1500
     is_eval: true
@@ -100,9 +102,8 @@ env:
     env_type: isaaclab
     seed: 2000
     device: cuda:0
-    task: ${env.train.task}
     io_module: ${env.train.io_module}
-    arena_args: ${env.train.arena_args}
+    arena: ${env.train.arena}
     init_params:
       id: Arena-v0
     use_fixed_reset_state_ids: false

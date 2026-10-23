@@ -62,7 +62,7 @@ def summarize_backend(directory):
         )),
         "episode_control_steps": steps,
         "episode_steps_per_second": steps / complete["elapsed_s"],
-        "peak_total_gpu_memory_mib": peak_gpu_mib,
+        "peak_host_single_gpu_memory_mib": peak_gpu_mib,
     }
 
 
@@ -79,7 +79,6 @@ def main():
         **results,
         "cpu_gpu_ci_overlap": overlap,
         "requires_backend_investigation": not overlap,
-        "official_checkpoint_meets_le_80_percent_rule": cpu["success_rate"] <= 0.8,
         "failure_classification": {
             "dropped_box": "Official object_dropped termination; takes priority among failures.",
             "not_placed": "Official lift predicate completed, but final task success did not.",
@@ -89,23 +88,26 @@ def main():
     }
     (args.run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     rows = [
-        "# 官方 N1.6 基线",
+        "# CPU/GPU checkpoint 基线",
         "",
-        "| 物理 | 成功数 | 成功率 | Wilson 95% CI | 摔倒数 | 摔倒比例 | rollout 耗时 |",
-        "|---|---:|---:|---|---:|---:|---:|",
+        "| 物理 | 成功数 | 成功率 | Wilson 95% CI | 摔倒数 | 摔倒比例 | rollout 耗时 | 主机单卡显存采样峰值 (MiB) |",
+        "|---|---:|---:|---|---:|---:|---:|---:|",
     ]
     for backend, result in results.items():
         lo, hi = result["wilson_95_ci"]
         rows.append(
             f"| {backend.upper()} | {result['successes']}/{result['episodes']} | "
             f"{result['success_rate']:.1%} | [{lo:.1%}, {hi:.1%}] | "
-            f"{result['falls']} | {result['fall_rate']:.1%} | {result['elapsed_s'] / 60:.1f} min |"
+            f"{result['falls']} | {result['fall_rate']:.1%} | {result['elapsed_s'] / 60:.1f} min | "
+            f"{result['peak_host_single_gpu_memory_mib']:.0f} |"
         )
     rows += ["", f"CPU/GPU 区间重叠：{overlap}。", "", "失败分类："]
     for backend, result in results.items():
         rows.append(f"- {backend.upper()}: {json.dumps(result['categories'], ensure_ascii=False)}")
     rows += [
         "",
+        "显存为 nvidia-smi 返回的所有 GPU、所有采样时刻中的单卡最大占用，包含推理服务器和其他进程；不是多卡总和或评测进程独占用量。",
+        "每 5 秒采样可能遗漏瞬时峰值。",
         "成功沿用 Arena 原生判定；抬起沿用 pick_and_place 的第 2 个 predicate。",
         "抬起 predicate 只表示官方进度条件；reset 后的箱体回弹也可能触发，不能据此证明已抓稳。",
         "没走到／没抓起按底盘距箱子初始 XY 是否达到 0.5 m 区分，是导航代理指标。",

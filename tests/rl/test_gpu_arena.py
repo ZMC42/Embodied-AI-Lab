@@ -1,4 +1,4 @@
-"""真实仿真：外部工厂注册、成功奖励、超时和掉箱终止。
+"""真实仿真：typed builder、成功奖励、超时和掉箱终止。
 
 Requires the RL environment, CUDA/Isaac Sim and Arena assets linked under data/assets. Runs
 real simulated environments on the CPU physics device by default, with GPU cameras; no training
@@ -18,10 +18,10 @@ def main():
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--viser-envs", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--legacy-factory", action="store_true")
     args = parser.parse_args()
     import torch
     from omegaconf import OmegaConf
+    from rlinf.data.schema.embodied_types import EnvTransition
 
     from embodied_ai_lab.rlinf.env import make_sim
 
@@ -29,26 +29,20 @@ def main():
         dict(
             device=args.device,
             viser_envs=args.viser_envs,
-            task="galileo_g1_locomanip_pick_and_place_rl",
             io_module="embodied_ai_lab.environments.g1_io",
-            arena_args=[
-                "--object",
-                "brown_box",
-                "--embodiment",
-                "g1_wbc_joint",
-                "--external_environment_class_path",
-                "embodied_ai_lab.environments.locomanip:LocomanipRLEnvironment",
-            ],
+            arena=dict(object="brown_box", destination="blue_sorting_bin",
+                       embodiment="g1_wbc_joint", enable_cameras=True),
         )
     )
-    if args.legacy_factory:
-        cfg.task = "galileo_g1_locomanip_pick_and_place_rl_legacy"
-        cfg.arena_args[-1] = "tests.rl.legacy_factory:LegacyLocomanipEnvironment"
     env, app = make_sim(cfg, args.num_envs, 1000)
     base = env.env
     env_zero_only = [True] + [False] * (args.num_envs - 1)
     try:
         assert str(base.device) == args.device
+        assert base.cfg.seed == 1000
+        assert base.num_envs == args.num_envs
+        assert base.variation_recorder is not None
+        assert base.variation_recorder._env is base
         obs, _ = env.reset(seed=1000)
         robot = base.scene["robot"]
         standing_pose = robot.data.root_pose_w.clone()
@@ -83,15 +77,33 @@ def main():
         assert term[:, -1].tolist() == env_zero_only, term
         assert not trunc.any()
         assert info[-1]["_final_observation"].tolist() == env_zero_only
+
+        def bootstrap(rewards, terminated, truncated):
+            return EnvTransition(
+                rewards=rewards, dones=terminated | truncated,
+                terminations=terminated, truncations=truncated,
+            ).compute_rewards(
+                bootstrap_values=torch.full((args.num_envs, 1), 2.0),
+                env_reward_weight=1.0, reward_weight=1.0, auto_reset=True,
+                bootstrap_type="standard", gamma=0.99,
+            )
+
+        torch.testing.assert_close(bootstrap(reward, term, trunc), reward)
         assert base.episode_length_buf.tolist() == [0] + [2] * (args.num_envs - 1)
         assert base._active_episode_mask.all()
         success_cfg.func = original_success
         base.termination_manager.set_term_cfg("success", success_cfg)
         env.reset(seed=1000)
         base.episode_length_buf[0] = 1499
-        _, reward2, term2, trunc2, _ = env.step(actions)
+        _, reward2, term2, trunc2, timeout_info = env.step(actions)
         assert trunc2[:, -1].tolist() == env_zero_only, trunc2
         assert not term2.any() and not reward2.any()
+        assert timeout_info[-1]["_final_observation"].tolist() == env_zero_only
+        assert torch.isfinite(timeout_info[-1]["final_observation"]["states"]).all()
+        timeout_bootstrapped = bootstrap(reward2, term2, trunc2)
+        expected = torch.zeros_like(reward2)
+        expected[0, -1] = 1.98
+        torch.testing.assert_close(timeout_bootstrapped, expected)
         env.reset(seed=1000)
         box = base.scene["brown_box"]
         pose = box.data.root_pose_w.clone()
@@ -107,11 +119,17 @@ def main():
             viser_http_status=viser_http_status,
             episode_steps=1500,
             camera=type(base.scene["robot_head_cam"]).__name__,
-            factory="ExampleEnvironmentBase" if args.legacy_factory else "ArenaEnvironmentFactory",
+            factory="ArenaEnvBuilder",
+            seed=base.cfg.seed,
+            variation_recorder_bound=True,
+            variation_records=list(base.variation_recorder.records),
             success_signal_injected=True,
             termination_overrides_coincident_timeout=True,
             success_rewards=reward.sum(1).tolist(),
             timeout_truncated=trunc2[:, -1].tolist(),
+            timeout_bootstrap_rewards=timeout_bootstrapped[:, -1].tolist(),
+            terminal_bootstrap_suppressed=True,
+            timeout_final_observation=True,
             dropped_terminated=term3[:, -1].tolist(),
             checkpoint_loop=False,
             standing_pelvis_z_relative_env_m=standing_height,
@@ -130,13 +148,8 @@ class ArenaGpuTest(unittest.TestCase):
     def test_real_arena_factory_rewards_and_termination(self):
         from tests.gpu import REPORTS, run_worker
 
-        # Exercise both the current factory and the supported legacy adapter.
-        for legacy in (False, True):
-            with self.subTest(legacy_factory=legacy):
-                report = REPORTS / f"arena-{'legacy' if legacy else 'factory'}.json"
-                options = ["--legacy-factory"] if legacy else []
-                run_worker(self, __name__, "--device", "cpu", "--output", report,
-                           *options, report=report)
+        report = REPORTS / "arena-factory.json"
+        run_worker(self, __name__, "--device", "cpu", "--output", report, report=report)
 
 
 if __name__ == "__main__":

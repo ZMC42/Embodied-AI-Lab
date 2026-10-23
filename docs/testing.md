@@ -21,13 +21,13 @@ RL 入口默认设置 `MALLOC_ARENA_MAX=2`，减少 glibc 在多线程模型与�
 | --- | --- |
 | `rl/test_gpu_inference.py` | `models/GR00T-N1.6-G1/checkpoint-20000`、`data/locomanipulation/generated/lerobot` 的 episode 0/49/99 第 100 帧；CUDA。分别运行 reference 与 RL fork，保留 `atol=rtol=1e-5` 的比较报告和源码选择。fork 已知存在 letterbox 预处理差异，原检查允许比较结果为不等价并选择 reference。 |
 | `rl/test_gpu_actor.py` | 同上；自动在 reference 子进程生成真实 observation，再验证 actor、value、ratio 与各组梯度，无需依赖其他测试的执行顺序。 |
-| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；分别检查当前 factory 与 legacy adapter，默认 2 个真实环境、CPU 物理。独立 worker 支持 `--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
+| `rl/test_gpu_arena.py` | RL 环境、Isaac Sim、CUDA 相机与 `data/assets` 中的 Arena 资产；检查 typed cfg + ArenaEnvBuilder，默认 2 个真实环境、CPU 物理。独立 worker 支持 `--num-envs`（默认 2）与 `--viser-envs`（默认 0）；Viser 开启时在 reset 和 step 后要求 8080 返回 HTTP 200。无需 checkpoint。 |
 | `rl/test_gpu_checkpoint.py` | 解析后的 RL 配置、完整训练权重及配置引用的基座模型；Isaac Sim、Arena 资产与 CUDA，重载后闭环执行两个动作块。 |
 | `rl/test_gpu_precision.py` | 同一份解析后 RL 配置、完整训练权重及基座模型；足够的主机内存加载模型，逐张量验证 dtype 和数值。 |
 | `rl/test_gpu_export.py` | 同一 RL 配置和完整权重、导出目录（含 `rl_export.json`）、G1 基座模型与上述数据；CUDA、空闲本地端口 5556。导出 manifest 必须对应被检查的权重路径；实测 RLinf 与 server 的单条及批量请求，保留 `atol=rtol=1e-5` 和初始噪声逐位相等判据。 |
 | `groot/test_gpu_smoke_checkpoint.py` | SFT smoke checkpoint（含优化器、scheduler、RNG、processor 等训练文件）、`models/GR00T-N1.6-3B` 与上述数据；CUDA。验证精确 global step、训练状态、冻结/更新权重及真实推理。 |
 
-GPU checkpoint 测试通过以下环境变量指定本次产物。四个路径变量没有默认实验目录，运行对应测试时必须设置；未设置或产物缺失都会失败。
+GPU checkpoint 测试通过以下环境变量指定本次产物。`LAB_GPU_RL_CONFIG` 须来自 typed builder 迁移后的训练运行，旧配置的 `arena_args` 不再适用。四个路径变量没有默认实验目录，运行对应测试时必须设置；未设置或产物缺失都会失败。
 
 | 变量 | 含义 |
 | --- | --- |
@@ -92,6 +92,6 @@ Arena worker 可独立指定环境数和查看器，直接执行以下命令，�
 )
 ```
 
-并行环境与 Viser 的 GPU 回归顺序运行 `--num-envs 2`、`--num-envs 4`、`--num-envs 2 --viser-envs 1` 三组。`--device cuda:0` 可切换为 GPU PhysX；`--legacy-factory` 检查 legacy adapter。独立 worker 与默认 unittest 入口均检查只在第 0 个环境注入成功、跌倒、超时和掉箱信号，其余环境不应误触发。
+并行环境与 Viser 的 GPU 回归顺序运行 `--num-envs 2`、`--num-envs 4`、`--num-envs 2 --viser-envs 1` 三组。`--device cuda:0` 可切换为 GPU PhysX。独立 worker 与默认 unittest 入口均检查只在第 0 个环境注入成功、跌倒、超时和掉箱信号，其余环境不应误触发。
 
 更换导出目录时，同时用 `LAB_GPU_EXPORT` 指定新的目录；导出来源权重必须与 `LAB_GPU_RL_WEIGHTS` 一致。完整导出与评测说明见 [eval.md](eval.md)。

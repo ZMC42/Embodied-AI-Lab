@@ -1,7 +1,6 @@
 """使用 RLinf 的仿真子进程承载注册后的 Arena Gym 环境。"""
 
 import importlib
-import sys
 from functools import partial
 
 import gymnasium as gym
@@ -22,39 +21,26 @@ def make_sim(cfg, num_envs, seed, debug=False):
     app = AppLauncher(
         headless=True, enable_cameras=True, device=cfg.device, **launcher_kwargs
     ).app
-    from isaaclab_arena.environments.isaaclab_interop import (
-        environment_registration_callback,
+    from isaaclab_arena.environments.arena_env_builder import ArenaEnvBuilder
+    from isaaclab_arena.environments.arena_env_builder_cfg import ArenaEnvBuilderCfg
+    from isaaclab_arena_environments.galileo_g1_locomanip_pick_and_place_environment import (
+        GalileoG1LocomanipPickAndPlaceEnvironmentCfg,
     )
 
+    from embodied_ai_lab.environments.locomanip import LocomanipRLEnvironment
     from embodied_ai_lab.rlinf.chunk_env import ChunkEnv
     from embodied_ai_lab.rlinf.deferred_reset import DeferredResetArenaEnv
 
-    argv = sys.argv
-    sys.argv = [
-        argv[0],
-        "--task",
-        cfg.task,
-        "--headless",
-        "--enable_cameras",
-        "--device",
-        cfg.device,
-        "--num_envs",
-        str(num_envs),
-        "--seed",
-        str(seed),
-        *list(cfg.arena_args),
-    ]
-    try:
-        environment_registration_callback()
-    finally:
-        sys.argv = argv
-    spec = gym.spec(cfg.task)
-    spec.entry_point = DeferredResetArenaEnv
-    env_cfg = spec.kwargs["env_cfg_entry_point"]
-    env_cfg.seed = seed
-    env_cfg.sim.device = cfg.device
-    env_cfg.scene.num_envs = num_envs
-    env = gym.make(cfg.task, cfg=env_cfg).unwrapped
+    class Builder(ArenaEnvBuilder):
+        def get_entry_point(self):
+            return DeferredResetArenaEnv
+
+    description = LocomanipRLEnvironment().build(
+        GalileoG1LocomanipPickAndPlaceEnvironmentCfg(**cfg.arena)
+    )
+    env = Builder(
+        description, ArenaEnvBuilderCfg(num_envs=num_envs, seed=seed, device=cfg.device)
+    ).make_registered().unwrapped
     converter = importlib.import_module(cfg.io_module)
     return ChunkEnv(
         env, partial(converter.wrap_obs, description=env.get_language_instruction())

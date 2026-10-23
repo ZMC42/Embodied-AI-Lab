@@ -35,10 +35,12 @@ scripts/eval/baseline.sh "$RUN_DIR" both 100 5
 | `<backend>/protocol.json` | 实际协议与运行环境 |
 | `<backend>/complete.json` | 完整结束后写入的 episode 数、成功数、耗时及 CUDA 峰值 |
 | `server-<backend>.log`、`eval-<backend>.log`、`kit-<backend>.log` | 模型服务器、评测及仿真日志 |
-| `gpu-<backend>.csv` | 每 5 秒采样的显存与利用率 |
+| `gpu-<backend>.csv` | 每 5 秒采样 `nvidia-smi` 返回的所有 GPU 的显存与利用率 |
 | `summary.json`、`report.md`、`summary-stdout.log` | `both` 模式下两个后端均完成后自动生成的汇总 |
 
 只运行单个后端时保留逐局产物，不会生成 CPU/GPU 汇总。命令退出码为 0 和 `complete.json` 共同证明对应运行完整结束；模型加载日志或部分逐局记录不足以证明完成。
+
+汇总字段 `peak_host_single_gpu_memory_mib` 是上述所有 GPU、所有采样时刻中的单卡最大显存占用，包含推理服务器和其他进程；多卡共享主机可能取到与评测无关的卡。它不是多卡用量之和，也不是评测进程独占用量；5 秒采样可能遗漏瞬时峰值。`complete.json` 中的 CUDA 峰值则来自仿真进程内的 PyTorch 统计。
 
 成功使用 Arena 原生 success 信号。失败分类优先记录官方掉箱终止，再区分已抬起但未放入、接近但未抬起、未接近；接近用底盘距箱子初始 XY ≤0.5 m 作为导航代理。抬起 predicate 仅表示官方进度条件，reset 后箱体回弹也可能触发。`fall_once` 是骨盆相对默认站立位置下降超过 0.4 m 的独立诊断，不改变成功判定。汇总使用 Wilson 95% 区间，记录 CPU/GPU 区间是否重叠；不能把不同协议的结果直接比较。
 

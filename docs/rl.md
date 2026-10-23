@@ -6,7 +6,11 @@
 
 ## 配置与实现
 
-`embodied_ai_lab.environments` 复用 Arena 官方任务注册及 G1 IO，RLinf 通过 `Arena-v0` 桥连接任务 `galileo_g1_locomanip_pick_and_place_rl`。成功奖励 +1，掉箱和超时为 0；动作块内部延后 reset，保留终局奖励和观测，供 RLinf 对超时进行 value bootstrap。环境成功率使用 Arena 官方 success 信号。`fall_once` 是骨盆相对默认站立位置下降超过 0.4 m 的诊断指标，终止后屏蔽、reset 时清零。
+`embodied_ai_lab.environments` 基于 Arena 官方 G1 搬运任务构建 RL 环境并复用 G1 IO，RLinf 通过 `Arena-v0` 桥接该环境。成功奖励 +1，掉箱和超时为 0；动作块内部延后 reset，保留终局奖励和观测，供 RLinf 对超时进行 value bootstrap。环境成功率使用 Arena 官方 success 信号。`fall_once` 是骨盆相对默认站立位置下降超过 0.4 m 的诊断指标，终止后屏蔽、reset 时清零。
+
+RL 环境由 `LocomanipRLEnvironment` 的 typed cfg 和 `ArenaEnvBuilder` 构建；`env.train.arena` / `env.eval.arena` 映射官方 `GalileoG1LocomanipPickAndPlaceEnvironmentCfg` 字段，可通过 Hydra 修改 `object`、`destination` 等场景参数。配方显式指定 `embodiment=g1_wbc_joint`、`enable_cameras=true`，不再接受任意 `arena_args` 或 legacy `ExampleEnvironmentBase` 工厂。AppLauncher 先启动，再导入 Arena；builder 负责 seed、设备、环境数及 variation recorder 的传递。
+
+`ArenaEnv` 目前仅支持 `auto_reset=true`、`ignore_terminations=false`；`max_episode_steps=1500` 对应 Arena 的 30 s × 50 Hz。这三个字段供 RLinf 的 reset、bootstrap 和 loss 逻辑使用，不能单独改成其他组合；改变 episode 上限须同步修改 Arena 任务配置。train 和 eval 均提供 `viser_envs: 0`，可使用 RLinf 的训练中验证及 `only_eval`。
 
 | 配方 | 模型与更新设置 |
 | --- | --- |
