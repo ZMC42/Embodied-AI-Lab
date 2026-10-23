@@ -54,9 +54,6 @@ def make_sim(cfg, num_envs, seed, debug=False):
     env_cfg.seed = seed
     env_cfg.sim.device = cfg.device
     env_cfg.scene.num_envs = num_envs
-    env_cfg.sim.physics.gpu_found_lost_pairs_capacity = 2**16
-    env_cfg.sim.physics.gpu_found_lost_aggregate_pairs_capacity = 2**16
-    env_cfg.sim.physics.gpu_total_aggregate_pairs_capacity = 2**16
     env = gym.make(cfg.task, cfg=env_cfg).unwrapped
     converter = importlib.import_module(cfg.io_module)
     return ChunkEnv(
