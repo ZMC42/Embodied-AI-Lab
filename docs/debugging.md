@@ -66,7 +66,7 @@ attach 后在相应进程文件中设置断点并继续；`justMyCode=false` 允
 
 ## 远程观察
 
-Arena 和 RL 安装脚本均包含 `viser==1.1.1`。使用 [单局观察](eval.md#单局观察) 的命令，将客户端尾参加上 `--viz viser`。在 VSCode 转发 TCP 8080，再打开 `http://localhost:8080`；有网络直连时可访问机器的 8080 端口。Viser 默认监听 `0.0.0.0:8080`，支持视角、暂停和重置。它同步 PhysX 状态，显示材质与 Kit 有差异；模型所需 RTX 相机仍然运行。
+Arena 和 RL 安装脚本均包含 `viser==1.1.1`。使用 [SFT 简单评测](eval.md#按官方教程简单评测-sft-checkpoint) 的命令，将客户端尾参加上 `--viz viser`。在 VSCode 转发 TCP 8080，再打开 `http://localhost:8080`；有网络直连时可访问机器的 8080 端口。Viser 默认监听 `0.0.0.0:8080`，支持视角、暂停和重置。它同步 PhysX 状态，显示材质与 Kit 有差异；模型所需 RTX 相机仍然运行。
 
 RL 训练时，在 [两迭代短跑](rl.md#两迭代短跑) 的训练参数末尾、日志管道之前追加 `env.train.viser_envs=1`，或用 `env.train.viser_envs=k` 最多显示 k 个环境；默认值 0 关闭查看器。端口固定为 8080，同一时间只运行一个仿真。这个开关仅用于调试短跑，正式长跑保持关闭。
 
