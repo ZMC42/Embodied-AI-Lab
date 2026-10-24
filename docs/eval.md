@@ -1,6 +1,6 @@
 # 闭环评测与 RL 导出
 
-从项目根目录执行，环境准备见 [setup.md](setup.md)。评测需要 Arena 资产、CUDA 相机以及模型 checkpoint；首次运行会加载和编译场景资产。同一时间只运行一个仿真实例，启动前停止占用本地端口 5555 的推理服务器。
+从项目根目录执行，环境准备见 [setup.md](setup.md)。评测需要 Arena 资产、CUDA 相机以及模型 checkpoint；首次运行会加载和编译场景资产。同一时间只运行一个仿真实例，启动新的推理服务器前确认本地端口 5555 空闲。
 
 ## 官方 G1 checkpoint
 
@@ -16,9 +16,59 @@ HF_HOME="$PWD/cache/huggingface" uvx --from huggingface_hub hf download \
 
 `models/`、`logs/` 等大型产物通过项目软链接写入大容量存储；Python 环境保留在本地 `.venvs/`。
 
+## 按官方教程简单评测 SFT checkpoint
+
+沿用 [Arena 官方闭环评测教程](../third_party/IsaacLab-Arena/docs/pages/example_workflows/locomanipulation/step_5_evaluation.rst)的流程：启动 GR00T 推理服务器，再启动 Arena 客户端，读取原生评测指标。两个终端均从项目根目录执行。
+
+终端 1 启动服务器并保持运行：
+
+```bash
+scripts/eval/groot-server.sh
+```
+
+服务器固定加载上述官方 G1 `checkpoint-20000`，监听 `127.0.0.1:5555`，使用 Arena 内嵌的官方 GR00T 推理入口。
+
+终端 2 按教程运行 1500 个控制步：
+
+```bash
+scripts/eval/arena.sh --num_steps 1500
+```
+
+需要简单统计多局成功率时，改为完整运行 10 个 episode：
+
+```bash
+scripts/eval/arena.sh --num_episodes 10
+```
+
+`--num_steps` 限制整次运行的总控制步数，可能在某局结束前停止；`--num_episodes` 按完整局数停止。选择一种即可，统计成功率时使用完整多局。`arena.sh` 默认运行 1 局、1 个环境、seed 42，追加的参数会覆盖对应默认值；设置 `--num_steps` 后，上游 runner 优先使用步数限制。
+
+默认使用 CPU 物理、GPU 模型推理与相机；官方教程说明该策略使用 CPU 物理生成的数据训练。需要录像时追加 `--record_camera_video`，例如：
+
+```bash
+scripts/eval/arena.sh --num_episodes 10 --record_camera_video
+```
+
+评测结束时查看终端的 `Metrics`，其中 `num_episodes` 是完成局数，`success_rate` 是成功局数占比。产物位于 `logs/evaluation/` 的时间戳子目录，包括 `episode_results_rank0.jsonl`、评测 HTML 报告及启用的视频。两侧日志分别追加到 `logs/groot-server.log` 和 `logs/arena-eval.log`，Kit 日志为 `logs/kit.log`。客户端退出码为 0 后，在终端 1 按 Ctrl+C 停止服务器并释放模型。
+
+### 更换为自己训练的 SFT checkpoint
+
+`groot-server.sh` 的模型路径固定。评测其他 G1 SFT checkpoint 时，在终端 1 改用以下官方 server 命令，将 `CHECKPOINT` 设为实际目录；终端 2 的客户端命令相同：
+
+```bash
+source scripts/env.sh
+CHECKPOINT="$LAB_ROOT/models/你的SFT运行/checkpoint-20000"
+cd "$GROOT_ROOT"
+"$GROOT_PY" -m gr00t.eval.run_gr00t_server \
+  --modality-config-path "$ARENA_ROOT/isaaclab_arena_gr00t/embodiments/g1/g1_sim_wbc_data_config.py" \
+  --model-path "$CHECKPOINT" \
+  --embodiment-tag NEW_EMBODIMENT --device cuda --host 127.0.0.1 --port 5555
+```
+
+客户端其他参数原样传给上游 policy runner；浏览器查看器、Kit 串流和双端断点见 [debugging.md](debugging.md)。需要 CPU/GPU 对照、额外失败诊断和置信区间汇总时，使用下面的基线评测入口。
+
 ## CPU/GPU 基线
 
-`scripts/eval/baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed]` 是完整评测入口。默认后端 `both`，每个后端 100 个 episode、5 个并行环境、G1 checkpoint、seed 42。输出目录中对应的 `cpu/`、`gpu/` 子目录必须不存在。
+`scripts/eval/baseline.sh OUTPUT_DIR [cpu|gpu|both] [episodes] [num_envs] [model_path] [seed]` 自动编排基线评测与统计。默认后端 `both`，每个后端 100 个 episode、5 个并行环境、G1 checkpoint、seed 42。输出目录中对应的 `cpu/`、`gpu/` 子目录必须不存在。
 
 ```bash
 RUN_DIR="$PWD/logs/baseline/$(date +%Y%m%d-%H%M%S)"
@@ -73,24 +123,6 @@ python3 -m embodied_ai_lab.eval.compare_checkpoints \
 ```
 
 脚本退出码为 0 且生成最终报告，表示两模型均已完成评测与汇总。成功率差值只描述本次结果；各模型的 Wilson 区间不等同于差值置信区间。筛选多个 checkpoint 时使用验证条件，最终比较另用未参与筛选的测试条件。
-
-## 单局观察
-
-`groot-server.sh` 固定加载默认 G1 checkpoint，监听 `127.0.0.1:5555`；`arena.sh` 等待服务器就绪后执行 1 个 episode、1 个环境、seed 42、CPU 物理。在两个终端中分别运行，均从仓库根目录启动。
-
-终端 1 启动服务器并保持运行：
-
-```bash
-scripts/eval/groot-server.sh
-```
-
-终端 2 启动客户端：
-
-```bash
-scripts/eval/arena.sh --record_camera_video
-```
-
-客户端产物位于 `logs/evaluation/`，两侧日志分别追加到 `logs/groot-server.log` 和 `logs/arena-eval.log`，Kit 日志为 `logs/kit.log`。客户端命令退出码为 0 后，在终端 1 按 Ctrl+C 停止服务器并释放模型。其余客户端参数原样传给上游 policy runner；浏览器查看器、Kit 串流和双端断点见 [debugging.md](debugging.md)。单局用于观察行为，不用于估计成功率。
 
 ## 导出 RL 权重
 
