@@ -32,13 +32,15 @@ GR00T RL fork 的 letterbox 预处理与 reference 不同，因此实际 RL 使�
 
 ## 并行环境数
 
-默认 `ppo-offload` 仍使用 2 个环境。在训练命令中，用 `scripts/train/rl.sh env.train.total_num_envs=N` 指定环境数，或在 recipe 后追加 `env.train.total_num_envs=N`。例如使用 4 个环境：
+默认 `ppo` 与 `ppo-offload` 仍使用 2 个环境。在训练命令中，用 `scripts/train/rl.sh env.train.total_num_envs=N` 指定环境数，或在 recipe 后追加 `env.train.total_num_envs=N`。例如使用 4 个环境：
 
 ```bash
 scripts/train/rl.sh env.train.total_num_envs=4 --cfg job --resolve
 ```
 
-该命令仅查看配置；实际训练见下方短跑示例。`ppo-offload` 的 `actor.global_batch_size` 自动解析为 `N × (max_steps_per_rollout_epoch / num_action_chunks)`，默认 rollout 长度下为 `30N`。2、4、8 个环境分别对应 60、120、240，每轮的每个 update epoch 仍只更新一次，学习率不变。`ppo` 配方的 batch 保持原配置，改变它的环境数时需要自行同步 batch。
+该命令仅查看配置；实际训练见下方短跑示例。`actor.global_batch_size` 自动解析为 `N × (max_steps_per_rollout_epoch / num_action_chunks)`，默认 rollout 长度下为 `30N`。2、4、8 个环境分别对应 60、120、240，每轮的每个 update epoch 仍只更新一次，学习率不变。
+
+`total_num_envs` 是全局环境总数，在所有 env worker 间平分；多卡时取 `每卡环境数 × GPU 数`，且须被 GPU 数整除；global batch 同样须被 `micro_batch_size × actor GPU 数` 整除，N 为 GPU 数的倍数时通常自然满足。扩展卡数只需调整 `cluster.num_nodes` 与可见 GPU，其余训练参数不变。
 
 容量实测使用 GPU PhysX、seed=1000、官方 checkpoint-20000，目标为每组两轮并在第 2 轮保存。成功组的第 2 轮迭代耗时不含保存，整卡峰值包含保存；余量统一按可分配的 24082 MiB 减去峰值计算。原始数据位于 `logs/num-envs-viser/`。
 

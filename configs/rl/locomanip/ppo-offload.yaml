@@ -13,8 +13,6 @@ actor:
   enable_offload: true
   # 单样本前向，避免BF16下随机重组批次改变chunk log-prob。
   micro_batch_size: 1
-  # 环境数 × 每环境 rollout 动作块数，每个 update epoch 累计后更新一次。
-  global_batch_size: ${multiply:${env.train.total_num_envs},${int_div:${env.train.max_steps_per_rollout_epoch},${actor.model.num_action_chunks}}}
   model:
     train_last_blocks: 1
     inference_micro_batch_size: 1
