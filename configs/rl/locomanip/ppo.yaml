@@ -114,7 +114,8 @@ rollout:
   pipeline_stage_num: 1
   model:
     model_path: ${actor.model.model_path}
-    precision: ${actor.model.precision}
+    # 基座输出为 BF16；rollout 前向与其保持一致。
+    precision: bf16
 actor:
   group_name: ActorGroup
   training_backend: fsdp
@@ -131,6 +132,8 @@ actor:
     num_action_chunks: 50
     action_dim: 35
     denoising_steps: 4
+    # 与 actor 的单样本前向对齐，避免 BF16 下重组批次改变 log-prob。
+    inference_micro_batch_size: 1
     no_split_modules:
     - EagleBackbone
     - BasicTransformerBlock
@@ -142,6 +145,7 @@ actor:
     rl_head_config:
       noise_level: 0.3
       action_noise_scale: 0.0
+    # 可训练主权重保留 FP32；前向精度由 FSDP mixed_precision 指定。
     precision: fp32
   optim:
     lr: 5.0e-06
@@ -157,9 +161,9 @@ actor:
     wrap_policy:
       transformer_layer_cls_to_wrap: ${actor.model.no_split_modules}
     mixed_precision:
-      param_dtype: ${actor.model.precision}
+      param_dtype: bf16
       reduce_dtype: ${actor.model.precision}
-      buffer_dtype: ${actor.model.precision}
+      buffer_dtype: bf16
 reward:
   use_reward_model: false
 critic:
