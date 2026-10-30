@@ -136,3 +136,76 @@ systemctl --user stop "$UNIT"
 ```
 
 主动 stop 可能改变结果字段，临时服务也可能在停止后被回收；stop 后的状态或 not-found 不能替代原始完成证据。失败服务保存证据后，可用 `systemctl --user reset-failed "$UNIT"` 清理失败状态。提前中止也须先记录状态，再 stop，并明确记录为中止。
+
+## 用户要求 tmux 的多机 Ray 任务
+
+训练与评测均从具名 tmux session 中执行。Ray 仍需要上文的 cgroup 清理边界：tmux 承担可接管的启动、等待和观察入口，临时 service 负责收拢会脱离原进程组的子进程，两者结合使用。不可只从短命 SSH 提交 service 就视为满足 tmux 要求；也不可为满足 tmux 而放弃两机 Ray 后代清理。
+
+以下为 R3e 首段的运维记录，业务参数和验收以 `private/task/2026-10-29-r3e-segment1-execution-plan.md` 为准。正式执行时记录实际启动时间、session、pane、unit、命令和退出码；当前仅准备，尚未创建这些 session。
+
+两机分别设置相同标识：
+
+```bash
+export RUN_ID=r3e-n24-20261029-s1-a01
+export SEGMENT_DIR=/mnt/nas/Vol2/EmbodiedAI/Embodied-AI-Lab/logs/r3e/$RUN_ID
+export TRAIN_CONFIG=r3e-segment1
+export RUN_DIR="$SEGMENT_DIR/training"
+```
+
+在3090项目根目录创建并接管控制台：
+
+```bash
+tmux new-session -d -s "lab-$RUN_ID-train3090" -c "$PWD"
+tmux set-option -t "lab-$RUN_ID-train3090" remain-on-exit on
+tmux attach -t "lab-$RUN_ID-train3090"
+```
+
+进入pane后再次显式设置上述变量，不依赖tmux环境继承。用现有运维入口执行 `bash private/probes/3090-multihost-services.sh start head`。在4090项目根目录以相同方式创建 `lab-$RUN_ID-sim4090`，pane内设置变量后执行 `start worker`。随后回3090控制台执行 `start cpu-probe`，等待其退出且CPU预检passed，再执行 `start driver`。head→worker→预检通过→driver顺序不变；unit名称为 `lab-$RUN_ID-{head,worker,cpu-probe,driver}`，services入口显式使用RUN_ID命名，未设置时才沿用历史目录basename。禁止在同一尝试中改变RUN_ID。
+
+提交driver后，训练控制台保持前台等待其结束。可在pane中运行以下等待逻辑；30秒本地状态查询不等于要求Agent每30秒读取日志，用户进度仍每15分钟汇报：
+
+```bash
+TASK_UNIT="lab-$RUN_ID-driver"
+while [[ "$(systemctl --user show "$TASK_UNIT" -p SubState --value)" == running ]]; do
+  sleep 30
+done
+systemctl --user show "$TASK_UNIT" \
+  -p ActiveState -p SubState -p Result -p ExecMainStatus \
+  > "$RUN_DIR/driver-service-result.txt"
+```
+
+等待结束后按业务验收原始状态及产物；失败或停止不自动重启。各主机控制台按既有services入口依次保存状态并stop本次driver、cpu-probe、worker、head，核查两机cgroup/GPU/端口及监控残留。session保留到清理验收完成；不要用kill-session代替这些步骤。
+
+训练清理通过后，4090评测以 `lab-$RUN_ID-eval4090` 单独托管。在4090项目根目录执行以下准备和启动命令；只在正式执行时运行，不能在方案准备阶段启动：
+
+```bash
+TASK_JOB_DIR="$SEGMENT_DIR/evaluation-job"
+mkdir -p "$TASK_JOB_DIR"
+cat > "$TASK_JOB_DIR/run.sh" <<'SH'
+#!/usr/bin/bash
+set -euo pipefail
+finish() {
+  status=$?
+  trap - EXIT
+  printf '%s\n' "$status" > "$TASK_JOB_DIR/exit-code"
+  exit "$status"
+}
+trap finish EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+exec > "$TASK_JOB_DIR/run.log" 2>&1
+ps -o pgid= -p "$$" | tr -d ' ' > "$TASK_JOB_DIR/process-group"
+bash "$TASK_ROOT/private/probes/r3e-segment1-eval.sh" gpu
+bash "$TASK_ROOT/private/probes/r3e-segment1-eval.sh" cpu
+bash "$TASK_ROOT/private/probes/r3e-segment1-eval.sh" report
+SH
+tmux new-session -d -s "lab-$RUN_ID-eval4090" -c "$PWD" \
+  env "RUN_ID=$RUN_ID" "RUN_DIR=$SEGMENT_DIR" "TASK_ROOT=$PWD" \
+  "TASK_JOB_DIR=$TASK_JOB_DIR" /usr/bin/bash "$TASK_JOB_DIR/run.sh"
+tmux set-option -t "lab-$RUN_ID-eval4090" remain-on-exit on
+```
+
+包装输出目录与业务根目录分别使用不同变量，避免退出码写错目录。评测脚本在同一个pane串行启动服务器和客户端，并承担正常结束清理；异常后按PGID及GPU/5555检查残留。独立启动的服务器必须另设具名session并记录。
+
+Ray临时token由执行者用安全路径部署，两机权限0600，只进入各自 `/run/user/<uid>/`，不进NAS包装或日志；清理后删除。tmux仅需传token文件路径，禁止把token值放进pane命令、tmux环境、命令行或输出。
