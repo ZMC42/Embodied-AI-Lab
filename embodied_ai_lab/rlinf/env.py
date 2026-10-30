@@ -47,9 +47,12 @@ def make_sim(cfg, num_envs, seed, debug=False):
     else:
         factory_type = EnvironmentRegistry().get_component_by_name(cfg.task)
     description = build_environment_from_cli(factory_type, Namespace(**cfg.arena))
-    env = Builder(
+    builder = Builder(
         description, ArenaEnvBuilderCfg(num_envs=num_envs, seed=seed, device=cfg.device)
-    ).make_registered().unwrapped
+    )
+    manager_cfg, kwargs = builder.compose_manager_cfg()
+    manager_cfg.num_rerenders_on_reset = 4
+    env = builder.make_registered(manager_cfg, kwargs).unwrapped
     converter = importlib.import_module(cfg.io_module)
     return ChunkEnv(
         env, partial(converter.wrap_obs, description=env.get_language_instruction())

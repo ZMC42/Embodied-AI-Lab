@@ -57,7 +57,14 @@ class EnvironmentFactoryTest(unittest.TestCase):
                 builder.description = description
                 builder.cfg = cfg
 
-            def make_registered(builder):
+            def compose_manager_cfg(builder):
+                builder.manager_cfg = SimpleNamespace(num_rerenders_on_reset=0)
+                builder.kwargs = {"render_mode": None}
+                return builder.manager_cfg, builder.kwargs
+
+            def make_registered(builder, manager_cfg, kwargs):
+                builder.registered_manager_cfg = manager_cfg
+                builder.registered_kwargs = kwargs
                 built.append(builder)
                 env = SimpleNamespace(
                     device=builder.cfg.device,
@@ -121,6 +128,9 @@ class EnvironmentFactoryTest(unittest.TestCase):
                     "num_envs": 3, "seed": 73, "device": "cpu",
                 })
                 self.assertIs(self.built[-1].get_entry_point(), self.entry_point)
+                self.assertIs(self.built[-1].registered_manager_cfg, self.built[-1].manager_cfg)
+                self.assertIs(self.built[-1].registered_kwargs, self.built[-1].kwargs)
+                self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 4)
         self.assertEqual([call.args[0] for call in self.build_environment.call_args_list],
                          [PickFactory, ReachFactory])
 
@@ -132,6 +142,7 @@ class EnvironmentFactoryTest(unittest.TestCase):
         ), 2, 42)
         self.assertEqual(env.convert_obs("observation"), ("observation", "reach cabinet"))
         self.assertIs(self.build_environment.call_args.args[0], ReachFactory)
+        self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 4)
 
     def test_external_factory_task_mismatch_fails_before_building(self):
         with self.assertRaisesRegex(AssertionError, "pick|reach"):
