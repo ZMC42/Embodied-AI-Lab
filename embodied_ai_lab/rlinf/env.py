@@ -1,6 +1,7 @@
 """使用 RLinf 的仿真子进程承载注册后的 Arena Gym 环境。"""
 
 import importlib
+from argparse import Namespace
 from functools import partial
 
 import gymnasium as gym
@@ -21,13 +22,15 @@ def make_sim(cfg, num_envs, seed, debug=False):
     app = AppLauncher(
         headless=True, enable_cameras=True, device=cfg.device, **launcher_kwargs
     ).app
+    from isaaclab_arena.assets.registries import EnvironmentRegistry
     from isaaclab_arena.environments.arena_env_builder import ArenaEnvBuilder
     from isaaclab_arena.environments.arena_env_builder_cfg import ArenaEnvBuilderCfg
-    from isaaclab_arena_environments.galileo_g1_locomanip_pick_and_place_environment import (
-        GalileoG1LocomanipPickAndPlaceEnvironmentCfg,
+    from isaaclab_arena_environments.cli import (
+        build_environment_from_cli,
+        ensure_environments_registered,
+        parse_and_return_external_environment_from_string,
     )
 
-    from embodied_ai_lab.environments.locomanip import LocomanipRLEnvironment
     from embodied_ai_lab.rlinf.chunk_env import ChunkEnv
     from embodied_ai_lab.rlinf.deferred_reset import DeferredResetArenaEnv
 
@@ -35,9 +38,15 @@ def make_sim(cfg, num_envs, seed, debug=False):
         def get_entry_point(self):
             return DeferredResetArenaEnv
 
-    description = LocomanipRLEnvironment().build(
-        GalileoG1LocomanipPickAndPlaceEnvironmentCfg(**cfg.arena)
-    )
+    ensure_environments_registered()
+    if cfg.external_environment_class_path is not None:
+        name, factory_type = parse_and_return_external_environment_from_string(
+            cfg.external_environment_class_path
+        )
+        assert name == cfg.task, f"External environment {name!r} does not match task {cfg.task!r}"
+    else:
+        factory_type = EnvironmentRegistry().get_component_by_name(cfg.task)
+    description = build_environment_from_cli(factory_type, Namespace(**cfg.arena))
     env = Builder(
         description, ArenaEnvBuilderCfg(num_envs=num_envs, seed=seed, device=cfg.device)
     ).make_registered().unwrapped

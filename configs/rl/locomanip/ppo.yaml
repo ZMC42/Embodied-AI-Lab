@@ -71,6 +71,8 @@ env:
     seed: 1000
     device: cuda:0
     ignore_terminations: false
+    task: galileo_g1_locomanip_pick_and_place_rl
+    external_environment_class_path: embodied_ai_lab.environments.locomanip:LocomanipRLEnvironment
     io_module: embodied_ai_lab.environments.g1_io
     arena:
       object: brown_box
@@ -102,6 +104,8 @@ env:
     env_type: isaaclab
     seed: 2000
     device: cuda:0
+    task: ${env.train.task}
+    external_environment_class_path: ${env.train.external_environment_class_path}
     io_module: ${env.train.io_module}
     arena: ${env.train.arena}
     init_params:

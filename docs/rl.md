@@ -8,7 +8,9 @@
 
 `embodied_ai_lab.environments` 基于 Arena 官方 G1 搬运任务构建 RL 环境并复用 G1 IO，RLinf 通过 `Arena-v0` 桥接该环境。成功奖励 +1，掉箱和超时为 0；动作块内部延后 reset，保留终局奖励和观测，供 RLinf 对超时进行 value bootstrap。环境成功率使用 Arena 官方 success 信号。`fall_once` 是骨盆相对默认站立位置下降超过 0.4 m 的诊断指标，终止后屏蔽、reset 时清零。
 
-RL 环境由 `LocomanipRLEnvironment` 的 typed cfg 和 `ArenaEnvBuilder` 构建；`env.train.arena` / `env.eval.arena` 映射官方 `GalileoG1LocomanipPickAndPlaceEnvironmentCfg` 字段，可通过 Hydra 修改 `object`、`destination` 等场景参数。配方显式指定 `embodiment=g1_wbc_joint`、`enable_cameras=true`，不再接受任意 `arena_args` 或 legacy `ExampleEnvironmentBase` 工厂。AppLauncher 先启动，再导入 Arena；builder 负责 seed、设备、环境数及 variation recorder 的传递。
+`env.train.task` / `env.eval.task` 选择 Arena 任务；`external_environment_class_path` 指定外部工厂的 `模块:类名`，其 `name` 必须与 `task` 一致。将该字段设为 `null` 时，按 `task` 从 Arena 官方注册表选择工厂。默认使用 `galileo_g1_locomanip_pick_and_place_rl` 和 `embodied_ai_lab.environments.locomanip:LocomanipRLEnvironment`。eval 的任务、外部工厂和场景参数默认引用 train，可分别覆盖。
+
+`arena` 保存所选工厂的场景参数；Arena 的公共适配函数将参数转换为该工厂的 typed cfg，legacy `ExampleEnvironmentBase` 工厂则接收 `get_env(Namespace(**arena))`，所需参数须在 `arena` 中提供。默认场景显式指定 `object=brown_box`、`destination=blue_sorting_bin`、`embodiment=g1_wbc_joint`、`enable_cameras=true`，可通过 Hydra 修改。切换任务时须配套调整场景参数、`io_module` 及模型的观测/动作接口。`arena_args` 列表尚未恢复。AppLauncher 先启动，再导入 Arena；`ArenaEnvBuilder` 负责 seed、设备、环境数及 variation recorder 的传递。
 
 `ArenaEnv` 目前仅支持 `auto_reset=true`、`ignore_terminations=false`；`max_episode_steps=1500` 对应 Arena 的 30 s × 50 Hz。这三个字段供 RLinf 的 reset、bootstrap 和 loss 逻辑使用，不能单独改成其他组合；改变 episode 上限须同步修改 Arena 任务配置。train 和 eval 均提供 `viser_envs: 0`，可使用 RLinf 的训练中验证及 `only_eval`。
 

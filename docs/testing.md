@@ -27,7 +27,7 @@ RL 入口默认设置 `MALLOC_ARENA_MAX=2`，减少 glibc 在多线程模型与�
 | `rl/test_gpu_export.py` | 同一 RL 配置和完整权重、导出目录（含 `rl_export.json`）、G1 基座模型与上述数据；CUDA、空闲本地端口 5556。导出 manifest 必须对应被检查的权重路径；实测 RLinf 与 server 的单条及批量请求，保留 `atol=rtol=1e-5` 和初始噪声逐位相等判据。 |
 | `groot/test_gpu_smoke_checkpoint.py` | SFT smoke checkpoint（含优化器、scheduler、RNG、processor 等训练文件）、`models/GR00T-N1.6-3B` 与上述数据；CUDA。验证精确 global step、训练状态、冻结/更新权重及真实推理。 |
 
-GPU checkpoint 测试通过以下环境变量指定本次产物。`LAB_GPU_RL_CONFIG` 须来自 typed builder 迁移后的训练运行，旧配置的 `arena_args` 不再适用。四个路径变量没有默认实验目录，运行对应测试时必须设置；未设置或产物缺失都会失败。
+GPU checkpoint 测试通过以下环境变量指定本次产物。`LAB_GPU_RL_CONFIG` 须包含 `env.eval.task`、`env.eval.external_environment_class_path`、`env.eval.arena`；旧配置需按原运行的任务和工厂补齐选择字段，并将旧 `arena_args` 中的场景参数迁到 `arena`。四个路径变量没有默认实验目录，运行对应测试时必须设置；未设置或产物缺失都会失败。
 
 | 变量 | 含义 |
 | --- | --- |

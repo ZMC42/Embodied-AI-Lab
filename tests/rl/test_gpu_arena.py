@@ -29,6 +29,8 @@ def main():
         dict(
             device=args.device,
             viser_envs=args.viser_envs,
+            task="galileo_g1_locomanip_pick_and_place_rl",
+            external_environment_class_path="embodied_ai_lab.environments.locomanip:LocomanipRLEnvironment",
             io_module="embodied_ai_lab.environments.g1_io",
             arena=dict(object="brown_box", destination="blue_sorting_bin",
                        embodiment="g1_wbc_joint", enable_cameras=True),
