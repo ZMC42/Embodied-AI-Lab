@@ -77,7 +77,7 @@ class DeferredResetRenderTest(unittest.TestCase):
 
         env.termination_manager.compute.side_effect = termination
         env.command_manager = Mock()
-        env.event_manager = Mock(available_modes=[])
+        env.event_manager = Mock(active_terms={})
         env.video_recorders = []
         env.render_enabled = env.has_rtx_sensors = True
         env._physics_handles_decimation = False

@@ -12,6 +12,7 @@ export RL_PY="$LAB_ROOT/.venvs/rl/bin/python"
 export HF_HOME="$LAB_ROOT/cache/huggingface"
 export OMNI_KIT_ACCEPT_EULA=YES
 export ACCEPT_EULA=Y
+export ISAACSIM_ASSET_ROOT="https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.1"
 export PYTHONUNBUFFERED=1
 export PYTHONPATH="$LAB_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export TMPDIR="$LAB_ROOT/tmp/runtime"
