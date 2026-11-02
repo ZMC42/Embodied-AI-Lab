@@ -16,7 +16,6 @@ class Simulator:
 
     device = "cpu"
     num_envs = 2
-    defer_resets = False
 
     def __init__(self):
         self.steps = 0
@@ -28,7 +27,6 @@ class Simulator:
         return {"states": torch.full((2, 1), -1.0)}, {}
 
     def step(self, actions):
-        assert self.defer_resets
         self.steps += 1
         return (
             {"states": torch.full((2, 1), float(self.steps))},
@@ -132,7 +130,6 @@ class ChunkEnvTest(unittest.TestCase):
         self.assertEqual(episode["success_once"].tolist(), [True, False])
         self.assertEqual(episode["fall_once"].tolist(), [False, True])
         self.assertFalse(any(signal.any() for signal in env.signals.values()))
-        self.assertFalse(sim.defer_resets)
 
     def test_reward_does_not_imply_success_and_post_terminal_fall_is_ignored(self):
         sim = Simulator()
@@ -147,6 +144,24 @@ class ChunkEnvTest(unittest.TestCase):
         self.assertGreater(episode["return"][0], 0)
         self.assertEqual(episode["success_once"].tolist(), [False, False])
         self.assertEqual(episode["fall_once"].tolist(), [False, False])
+
+    def test_first_done_stays_latched_when_terminal_signal_clears(self):
+        sim = Simulator()
+        step = sim.step
+
+        def transient_terminal(actions):
+            obs, reward, term, trunc, info = step(actions)
+            term[0] = sim.steps == 2
+            trunc[0] = False
+            return obs, reward, term, trunc, info
+
+        sim.step = transient_terminal
+        env = ChunkEnv(sim, lambda obs: obs)
+        _, rewards, terminated, _, infos = env.step(torch.zeros(2, 5, 1))
+        self.assertEqual(rewards[0].tolist(), [0, 1, 0, 0, 0])
+        self.assertTrue(terminated[0, -1])
+        self.assertEqual(infos[0]["final_observation"]["states"][0].item(), 2)
+        self.assertEqual(sim.resets, [[0, 1]])
 
 
 if __name__ == "__main__":

@@ -32,7 +32,6 @@ class ChunkEnv:
         terminated = torch.zeros_like(done)
         truncated = torch.zeros_like(done)
         rewards = torch.zeros(n, horizon, device=self.device)
-        self.env.defer_resets = True
         final_obs = None
         for i in range(horizon):
             obs, reward, term, trunc, _ = self.env.step(actions[:, i])
@@ -60,7 +59,6 @@ class ChunkEnv:
             terminated |= term
             truncated |= trunc
             done |= ended
-        self.env.defer_resets = False
         terminations = torch.zeros(n, horizon, dtype=torch.bool, device=self.device)
         truncations = torch.zeros_like(terminations)
         terminations[:, -1] = terminated

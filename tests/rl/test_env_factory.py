@@ -100,8 +100,8 @@ class EnvironmentFactoryTest(unittest.TestCase):
             "embodied_ai_lab.environments.locomanip": SimpleNamespace(
                 LocomanipRLEnvironment=PickFactory,
             ),
-            "embodied_ai_lab.rlinf.deferred_reset": SimpleNamespace(
-                DeferredResetArenaEnv=self.entry_point,
+            "embodied_ai_lab.rlinf.training_env": SimpleNamespace(
+                TrainingArenaEnv=self.entry_point,
             ),
             "factory_fixture": SimpleNamespace(ReachFactory=ReachFactory),
             "factory_io_fixture": SimpleNamespace(
@@ -130,7 +130,8 @@ class EnvironmentFactoryTest(unittest.TestCase):
                 self.assertIs(self.built[-1].get_entry_point(), self.entry_point)
                 self.assertIs(self.built[-1].registered_manager_cfg, self.built[-1].manager_cfg)
                 self.assertIs(self.built[-1].registered_kwargs, self.built[-1].kwargs)
-                self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 4)
+                self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 0)
+                self.assertFalse(self.built[-1].registered_manager_cfg.auto_reset)
         self.assertEqual([call.args[0] for call in self.build_environment.call_args_list],
                          [PickFactory, ReachFactory])
 
@@ -142,7 +143,7 @@ class EnvironmentFactoryTest(unittest.TestCase):
         ), 2, 42)
         self.assertEqual(env.convert_obs("observation"), ("observation", "reach cabinet"))
         self.assertIs(self.build_environment.call_args.args[0], ReachFactory)
-        self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 4)
+        self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 0)
 
     def test_external_factory_task_mismatch_fails_before_building(self):
         with self.assertRaisesRegex(AssertionError, "pick|reach"):

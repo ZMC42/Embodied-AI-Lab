@@ -42,21 +42,22 @@ Arena = upstream_methods(
 )
 
 
-class DeferredResetRenderTest(unittest.TestCase):
+class ResetLifecycleTest(unittest.TestCase):
     def setUp(self):
-        module_path = ROOT / "embodied_ai_lab/rlinf/deferred_reset.py"
-        spec = importlib.util.spec_from_file_location("deferred_reset_under_test", module_path)
+        module_path = ROOT / "embodied_ai_lab/rlinf/training_env.py"
+        spec = importlib.util.spec_from_file_location("training_env_under_test", module_path)
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {
             "isaaclab_arena.environments.isaaclab_arena_manager_based_env":
                 SimpleNamespace(IsaacLabArenaManagerBasedRLEnv=Arena),
         }):
             spec.loader.exec_module(module)
-        self.env = env = module.DeferredResetArenaEnv()
+        self.env = env = module.TrainingArenaEnv()
         env.device, env.num_envs = "cpu", 2
         env.cfg = SimpleNamespace(
             decimation=1, sim=SimpleNamespace(render_interval=1),
             num_rerenders_on_reset=2, compute_final_obs=False, wait_for_textures=False,
+            auto_reset=False,
         )
         env.sim = Mock(is_rendering=True)
         env.sim.consume_reset_request.return_value = False
@@ -99,6 +100,10 @@ class DeferredResetRenderTest(unittest.TestCase):
         with patch("torch.cuda.empty_cache"):
             _, _, terminated, _, infos = chunk.step(torch.zeros(2, 5, 1))
         self.assertEqual(env.actual_resets, [[0]])
+        # A terminal signal inside a chunk is not a reset lifecycle. Only the
+        # explicit reset at the chunk boundary may finalize recorder state.
+        self.assertEqual(env.recorder_manager.record_pre_reset.call_count, 1)
+        self.assertEqual(env.recorder_manager.record_post_reset.call_count, 1)
         # Five normal step renders, then two configured renders for the real reset.
         calls = env.sim.render.call_args_list
         self.assertEqual(sum(bool(call.kwargs) for call in calls), 5)
@@ -107,19 +112,14 @@ class DeferredResetRenderTest(unittest.TestCase):
         self.assertEqual(terminated[0].tolist(), [False] * 4 + [True])
         self.assertEqual(infos[0]["final_observation"]["states"][0].item(), 2)
 
-    def test_non_deferred_step_keeps_upstream_reset_render(self):
+    def test_default_step_keeps_upstream_reset_lifecycle(self):
+        self.env.cfg.auto_reset = True
         self.env.common_step_counter = 1
         self.env.step(torch.zeros(2, 1))
         self.assertEqual(self.env.actual_resets, [[0]])
         self.assertEqual(self.env.sim.render.call_count, 3)
         self.assertEqual(self.env.cfg.num_rerenders_on_reset, 2)
 
-    def test_failed_deferred_step_restores_reset_render_setting(self):
-        self.env.defer_resets = True
-        self.env.action_manager.process_action.side_effect = RuntimeError("step failed")
-        with self.assertRaisesRegex(RuntimeError, "step failed"):
-            self.env.step(torch.zeros(2, 1))
-        self.assertEqual(self.env.cfg.num_rerenders_on_reset, 2)
 
 
 if __name__ == "__main__":

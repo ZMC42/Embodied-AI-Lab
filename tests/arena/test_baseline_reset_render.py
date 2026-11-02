@@ -32,7 +32,7 @@ class BaselineResetRenderTest(unittest.TestCase):
             def make_registered(manager_cfg, env_kwargs):
                 self.assertIs(manager_cfg, cfg)
                 self.assertIs(env_kwargs, kwargs)
-                self.assertEqual(manager_cfg.num_rerenders_on_reset, 4)
+                self.assertEqual(manager_cfg.num_rerenders_on_reset, 0)
                 # Protocol must read the built environment's actual configuration.
                 base.cfg.num_rerenders_on_reset = 2
                 return env

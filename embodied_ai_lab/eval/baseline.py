@@ -44,7 +44,6 @@ def main():
         builder = get_arena_builder_from_cli(args)
         builder.arena_env.episode_recorder_terms["baseline"] = EpisodeRecorderTermCfg(func=record_diagnostics)
         cfg, kwargs = builder.compose_manager_cfg()
-        cfg.num_rerenders_on_reset = 4
         cfg.recorders.baseline_diagnostics = RecorderTermCfg(class_type=BaselineDiagnosticsRecorder)
         cfg.recorders.dataset_export_dir_path = str(args.output)
         env = builder.make_registered(cfg, kwargs)

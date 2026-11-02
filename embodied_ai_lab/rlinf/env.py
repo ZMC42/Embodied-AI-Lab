@@ -32,11 +32,11 @@ def make_sim(cfg, num_envs, seed, debug=False):
     )
 
     from embodied_ai_lab.rlinf.chunk_env import ChunkEnv
-    from embodied_ai_lab.rlinf.deferred_reset import DeferredResetArenaEnv
+    from embodied_ai_lab.rlinf.training_env import TrainingArenaEnv
 
     class Builder(ArenaEnvBuilder):
         def get_entry_point(self):
-            return DeferredResetArenaEnv
+            return TrainingArenaEnv
 
     ensure_environments_registered()
     if cfg.external_environment_class_path is not None:
@@ -51,7 +51,7 @@ def make_sim(cfg, num_envs, seed, debug=False):
         description, ArenaEnvBuilderCfg(num_envs=num_envs, seed=seed, device=cfg.device)
     )
     manager_cfg, kwargs = builder.compose_manager_cfg()
-    manager_cfg.num_rerenders_on_reset = 4
+    manager_cfg.auto_reset = False
     env = builder.make_registered(manager_cfg, kwargs).unwrapped
     converter = importlib.import_module(cfg.io_module)
     return ChunkEnv(

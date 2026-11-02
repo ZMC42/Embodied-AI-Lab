@@ -9,6 +9,7 @@ import argparse
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.request import urlopen
 
 
@@ -43,6 +44,8 @@ def main():
         assert str(base.device) == args.device
         assert base.cfg.seed == 1000
         assert base.num_envs == args.num_envs
+        assert base.cfg.auto_reset is False
+        assert base.metadata["autoreset_mode"].value == "Disabled"
         assert base.variation_recorder is not None
         assert base.variation_recorder._env is base
         obs, _ = env.reset(seed=1000)
@@ -69,7 +72,12 @@ def main():
         success_cfg.func = lambda e, **kw: torch.tensor(env_zero_only, device=e.device)
         base.termination_manager.set_term_cfg("success", success_cfg)
         base.episode_length_buf[0] = 1499
-        out, reward, term, trunc, info = env.step(actions)
+        with patch.object(base.recorder_manager, "record_pre_reset",
+                          wraps=base.recorder_manager.record_pre_reset) as pre_reset, \
+             patch.object(base.recorder_manager, "record_post_reset",
+                          wraps=base.recorder_manager.record_post_reset) as post_reset:
+            out, reward, term, trunc, info = env.step(actions)
+        assert pre_reset.call_count == post_reset.call_count == 1
         viser_http_status = None
         if args.viser_envs > 0:
             with urlopen("http://127.0.0.1:8080", timeout=10) as response:
@@ -126,6 +134,8 @@ def main():
             variation_recorder_bound=True,
             variation_records=list(base.variation_recorder.records),
             success_signal_injected=True,
+            chunk_owns_reset=True,
+            reset_lifecycle_calls=pre_reset.call_count,
             termination_overrides_coincident_timeout=True,
             success_rewards=reward.sum(1).tolist(),
             timeout_truncated=trunc2[:, -1].tolist(),
