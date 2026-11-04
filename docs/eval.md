@@ -2,6 +2,8 @@
 
 从项目根目录执行，环境准备见 [setup.md](setup.md)。评测需要 Arena 资产、CUDA 相机以及模型 checkpoint；首次运行会加载和编译场景资产。同一时间只运行一个仿真实例，启动新的推理服务器前确认本地端口 5555 空闲。
 
+Arena 任务资产使用 NVIDIA production 源；`scripts/env.sh` 将资产版本固定为 6.1，与当前 Isaac Sim 环境一致。
+
 ## 官方 G1 checkpoint
 
 默认评测模型为 `nvidia/GN1x-Tuned-Arena-G1-Loco-Manipulation`，revision `dfe74af855007f26093f362cd2d7a2f404b64b93`。只下载推理文件，约 6.2 GB：
