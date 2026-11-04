@@ -4,9 +4,14 @@ source "$(dirname "$0")/../env.sh"
 # Limit glibc arena retention while staging CPU checkpoints.
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 recipe=ppo-offload
+task=locomanip
 if [[ $# -gt 0 && "$1" != *=* && "$1" != -* ]]; then
   recipe="$1"
   shift
+fi
+if [[ "$recipe" == */* ]]; then
+  task="${recipe%/*}"
+  recipe="${recipe##*/}"
 fi
 export LAB_ROOT
 export EMBODIED_PATH="$RLINF_ROOT/examples/embodiment"
@@ -17,5 +22,5 @@ export HYDRA_FULL_ERROR=1
 export RAY_TMPDIR=/tmp/erl-training
 cd "$ARENA_ROOT"
 exec "$RL_PY" -m embodied_ai_lab.rlinf.train \
-  --config-path "$LAB_ROOT/configs/rl/locomanip" --config-name "$recipe" \
+  --config-path "$LAB_ROOT/configs/rl/$task" --config-name "$recipe" \
   "hydra.searchpath=[file://$EMBODIED_PATH/config]" "$@"

@@ -86,7 +86,7 @@ def build_model(cfg, torch_dtype=torch.bfloat16):
         if parameter.requires_grad:
             parameter.data = parameter.data.to(torch_dtype)
     model._no_split_modules = list(cfg.no_split_modules)
-    if cfg.obs_converter_type == "arena_g1":
+    if cfg.obs_converter_type in ("arena_g1", "arena_droid"):
         model.predict_action_batch = partial(predict_g1, model)
     if cfg.get("inference_micro_batch_size"):
         model.predict_action_batch = partial(
@@ -105,10 +105,12 @@ def register():
         OBS_CONVERSION,
     )
 
-    from embodied_ai_lab.environments import g1_io
+    from embodied_ai_lab.environments import droid_io, g1_io
     from embodied_ai_lab.rlinf.env import ArenaEnv
 
     REGISTER_ISAACLAB_ENVS["Arena-v0"] = ArenaEnv
     OBS_CONVERSION["arena_g1"] = g1_io.policy_obs
     ACTION_CONVERSION_N1D6["arena_g1"] = g1_io.policy_actions
+    OBS_CONVERSION["arena_droid"] = droid_io.policy_obs
+    ACTION_CONVERSION_N1D6["arena_droid"] = droid_io.policy_actions
     register_model("gr00t_n1d6", build_model, force=True)

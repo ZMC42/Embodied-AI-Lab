@@ -47,9 +47,10 @@ def make_sim(cfg, num_envs, seed, debug=False):
     else:
         factory_type = EnvironmentRegistry().get_component_by_name(cfg.task)
     description = build_environment_from_cli(factory_type, Namespace(**cfg.arena))
-    builder = Builder(
-        description, ArenaEnvBuilderCfg(num_envs=num_envs, seed=seed, device=cfg.device)
-    )
+    builder_options = dict(num_envs=num_envs, seed=seed, device=cfg.device)
+    if getattr(cfg, "language_instruction", None) is not None:
+        builder_options["language_instruction"] = cfg.language_instruction
+    builder = Builder(description, ArenaEnvBuilderCfg(**builder_options))
     manager_cfg, kwargs = builder.compose_manager_cfg()
     manager_cfg.auto_reset = False
     env = builder.make_registered(manager_cfg, kwargs).unwrapped

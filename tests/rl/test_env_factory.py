@@ -145,6 +145,12 @@ class EnvironmentFactoryTest(unittest.TestCase):
         self.assertIs(self.build_environment.call_args.args[0], ReachFactory)
         self.assertEqual(self.built[-1].registered_manager_cfg.num_rerenders_on_reset, 0)
 
+    def test_language_instruction_is_passed_to_builder(self):
+        cfg = self.config("pick", {"object": "cube"})
+        cfg.language_instruction = "Put the cube in the bowl."
+        make_sim(cfg, 4, 1000)
+        self.assertEqual(self.built[-1].cfg.language_instruction, cfg.language_instruction)
+
     def test_external_factory_task_mismatch_fails_before_building(self):
         with self.assertRaisesRegex(AssertionError, "pick|reach"):
             make_sim(self.config(
