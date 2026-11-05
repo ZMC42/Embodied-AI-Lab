@@ -4,6 +4,7 @@ import importlib.metadata
 import json
 import os
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from isaaclab_arena.cli.isaaclab_arena_cli import get_isaaclab_arena_cli_parser
@@ -17,15 +18,10 @@ def main():
     parser.add_argument("--port", type=int, default=5555)
     parser.add_argument("--model-path", type=Path, default=Path(__file__).resolve().parents[2] / "models/GR00T-N1.6-G1/checkpoint-20000")
     args, _ = parser.parse_known_args()
-    args.output.mkdir(parents=True, exist_ok=False)
+    args.output.mkdir(parents=True, exist_ok=True)
 
-    with SimulationAppContext(args):
-        import torch
-        from isaaclab.managers.recorder_manager import RecorderTermCfg
+    with SimulationAppContext(args), ExitStack() as resources:
         from isaaclab_arena.evaluation.policy_runner import rollout_policy
-        from isaaclab_arena.recording.episode_recorder_manager import (
-            EpisodeRecorderTermCfg,
-        )
         from isaaclab_arena_environments.cli import (
             get_arena_builder_from_cli,
             get_isaaclab_arena_environments_cli_parser,
@@ -34,19 +30,14 @@ def main():
             Gr00tRemoteClosedloopPolicy,
             Gr00tRemoteClosedloopPolicyCfg,
         )
-        from embodied_ai_lab.environments.baseline_recorder import (
-            BaselineDiagnosticsRecorder,
-            record_diagnostics,
-        )
 
         parser = get_isaaclab_arena_environments_cli_parser(parser)
         args = parser.parse_args()
         builder = get_arena_builder_from_cli(args)
-        builder.arena_env.episode_recorder_terms["baseline"] = EpisodeRecorderTermCfg(func=record_diagnostics)
         cfg, kwargs = builder.compose_manager_cfg()
-        cfg.recorders.baseline_diagnostics = RecorderTermCfg(class_type=BaselineDiagnosticsRecorder)
         cfg.recorders.dataset_export_dir_path = str(args.output)
         env = builder.make_registered(cfg, kwargs)
+        resources.callback(env.close)
         base = env.unwrapped
         assert base.max_episode_length == 1500
         assert abs(base.step_dt - 0.02) < 1e-8
@@ -61,6 +52,7 @@ def main():
                 remote_port=args.port,
             )
         )
+        resources.callback(policy.close)
         assert policy.action_chunk_length == 50
         rl_inference = os.environ["EVAL_RL_SERVER"] == "1"
         protocol = {
@@ -77,8 +69,6 @@ def main():
             "checkpoint": str(args.model_path.resolve()),
             "inference_runtime": "rl-reference-sdpa" if rl_inference else "official-flash-attention",
             "inference_micro_batch_size": 1 if rl_inference else args.num_envs,
-            "navigation_threshold_m": 0.5,
-            "fall_diagnostic_drop_m": 0.4,
             "packages": {
                 name: importlib.metadata.version(name)
                 for name in ("torch", "isaacsim", "isaaclab", "isaaclab_arena")
@@ -86,21 +76,16 @@ def main():
         }
         (args.output / "protocol.json").write_text(json.dumps(protocol, indent=2) + "\n")
         start = time.monotonic()
-        try:
-            rollout_policy(env, policy, num_steps=None, num_episodes=args.episodes)
-            records = [json.loads(line) for line in (args.output / "episodes.jsonl").read_text().splitlines()]
-            assert len(records) == args.episodes
-            result = {
-                "episodes": len(records),
-                "successes": sum(record["success"] for record in records),
-                "elapsed_s": time.monotonic() - start,
-                "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated(),
-            }
-            (args.output / "complete.json").write_text(json.dumps(result, indent=2) + "\n")
-            print(json.dumps(result), flush=True)
-        finally:
-            policy.close()
-            env.close()
+        rollout_policy(env, policy, num_steps=None, num_episodes=args.episodes)
+        records = [json.loads(line) for line in (args.output / "episodes.jsonl").read_text().splitlines()]
+        assert len(records) == args.episodes
+        result = {
+            "episodes": len(records),
+            "successes": sum(record["success"] for record in records),
+            "elapsed_s": time.monotonic() - start,
+        }
+        (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+        print(json.dumps(result), flush=True)
 
 
 if __name__ == "__main__":

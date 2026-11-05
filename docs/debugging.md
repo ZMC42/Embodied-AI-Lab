@@ -13,7 +13,7 @@
 - 客户端 `third_party/IsaacLab-Arena/isaaclab_arena_gr00t/policy/gr00t_remote_closedloop_policy.py` 的 `_client.get_action(...)`。
 - 服务器 `third_party/IsaacLab-Arena/submodules/Isaac-GR00T/gr00t/policy/gr00t_policy.py` 的 `self.model.get_action(...)`。
 
-两端均为 `justMyCode=false`。服务器停在断点时，客户端等待 ZMQ 返回是预期行为。继续后 action 应返回并推进仿真；compound 的 `stopAll=true` 让停止操作结束两侧调试进程。调试产物位于 `logs/debug/`，Kit 日志为 `logs/debug-kit.log`。该模式用于交互调试；完整评测使用 [评测文档](eval.md) 的基线入口。
+两端均为 `justMyCode=false`。服务器停在断点时，客户端等待 ZMQ 返回是预期行为。继续后 action 应返回并推进仿真；compound 的 `stopAll=true` 让停止操作结束两侧调试进程。调试产物位于 `logs/debug/`，Kit 日志为 `logs/debug-kit.log`。该模式用于交互调试；完整评测使用 [评测文档](eval.md) 的统一入口。
 
 ## 训练断点调试
 
@@ -66,7 +66,7 @@ attach 后在相应进程文件中设置断点并继续；`justMyCode=false` 允
 
 ## 远程观察
 
-Arena 和 RL 安装脚本均包含 `viser==1.1.1`。使用 [SFT 简单评测](eval.md#按官方教程简单评测-sft-checkpoint) 的命令，将客户端尾参加上 `--viz viser`。在 VSCode 转发 TCP 8080，再打开 `http://localhost:8080`；有网络直连时可访问机器的 8080 端口。Viser 默认监听 `0.0.0.0:8080`，支持视角、暂停和重置。它同步 PhysX 状态，显示材质与 Kit 有差异；模型所需 RTX 相机仍然运行。
+Arena 和 RL 安装脚本均包含 `viser==1.1.1`。使用上述双端调试 compound，在 `Arena client (headless)` 的 `args` 增加 `"--viz", "viser"`。在 VSCode 转发 TCP 8080，再打开 `http://localhost:8080`；有网络直连时可访问机器的 8080 端口。Viser 默认监听 `0.0.0.0:8080`，支持视角、暂停和重置。它同步 PhysX 状态，显示材质与 Kit 有差异；模型所需 RTX 相机仍然运行。
 
 RL 训练时，在 [两迭代短跑](rl.md#两迭代短跑) 的训练参数末尾、日志管道之前追加 `env.train.viser_envs=1`，或用 `env.train.viser_envs=k` 最多显示 k 个环境；默认值 0 关闭查看器。端口固定为 8080，同一时间只运行一个仿真。这个开关仅用于调试短跑，正式长跑保持关闭。
 
@@ -81,11 +81,9 @@ RL 训练时，在 [两迭代短跑](rl.md#两迭代短跑) 的训练参数末�
 
 训练运行期两次 HTTP GET 均返回 200；HTTP 200 只验证服务可达，浏览器中的画面仍需用户在 Mac 上实际打开确认。
 
-需要完整 Kit 界面时，在同一客户端命令增加 `--viz kit --livestream 2`，通过 [Isaac Sim WebRTC Streaming Client](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/manual_livestream_clients.html) 连接机器地址。客户端需能访问 TCP 49100 和 UDP 47998，VSCode 的普通 TCP 转发无法传送 UDP 视频。
+需要完整 Kit 界面时，将客户端的查看器参数改为 `"--viz", "kit", "--livestream", "2"`，通过 [Isaac Sim WebRTC Streaming Client](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/manual_livestream_clients.html) 连接机器地址。客户端需能访问 TCP 49100 和 UDP 47998，VSCode 的普通 TCP 转发无法传送 UDP 视频。
 
-多网卡机器可用 `--livestream 1` 显式公布客户端可达地址。在客户端命令前设置 `PUBLIC_IP=<可达地址>`；该值可以是局域网或 VPN 地址。确认相应网络和防火墙允许上述端口。
-
-VSCode compound 中需要查看器时，在 `Arena client (headless)` 的 `args` 增加 `"--viz", "viser"`，或 `"--viz", "kit", "--livestream", "2"`。使用显式公布地址模式则设 livestream=1，并在该配置的 `env` 增加 `PUBLIC_IP`。shell 入口的变量不会自动传进 launch 配置。
+多网卡机器可将客户端的 livestream 参数设为 `1`，并在该配置的 `env` 增加 `PUBLIC_IP=<可达地址>`，显式公布局域网或 VPN 地址。确认相应网络和防火墙允许上述端口。shell 入口的变量不会自动传进 launch 配置。
 
 查看器画面、双端断点和串流连接应分别验收；能生成视频不能证明实时串流或键盘交互可用。
 
